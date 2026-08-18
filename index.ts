@@ -13,6 +13,10 @@ import {
   createGetTodoStackTool,
   createUpdateTodoStackTool,
 } from './lib/tools.ts';
+import {
+  TODO_STACK_REMINDER_CONTEXT_NAME,
+  buildTodoStackReminderContext,
+} from './lib/reminders.ts';
 import { renderTodoStackContext } from './lib/view.ts';
 import type { TodoStackState } from './lib/types.ts';
 
@@ -22,6 +26,16 @@ const inject = ['tools', 'systemPrompt'];
 const DEFAULT_MAX_NODES = 200;
 const DEFAULT_MAX_READ_NODES = 80;
 const DEFAULT_CONTEXT_CHILDREN = 8;
+const DEFAULT_REMINDER_INTERVAL_NODES = 30;
+
+const TODO_STACK_GUIDANCE = [
+  '## Todo stack',
+  'For work beyond a direct answer or one trivial action, create or focus one short task before working.',
+  'Add and focus a direct child when you are about to do a distinct multi-action piece of work, unless the focused task will finish in the next few actions or has no distinct child worth tracking.',
+  'A well-structured stack of short tasks helps the user understand what you are doing and how the work is progressing.',
+  'Keep each node to one short outcome; details stay in the conversation and workspace.',
+  'Complete verified work, exit suspended work, and leave siblings or ancestors alone unless their state actually changes.',
+].join('\n');
 
 export interface Config {
   /** Maximum number of retained tree nodes. */
@@ -32,6 +46,8 @@ export interface Config {
   contextChildren?: number;
   /** Publish the flattened `todos` projection consumed by the stock TodoDock. */
   todoDock?: boolean;
+  /** Open-turn surface-node interval for optional maintenance reminders. */
+  reminderIntervalNodes?: number;
 }
 
 function positiveInteger(value: number | undefined, fallback: number, name: string): number {
@@ -56,6 +72,11 @@ function apply(ctx: Context, config: Config = {}): void {
     'contextChildren',
   );
   const todoDock = config.todoDock !== false;
+  const reminderIntervalNodes = positiveInteger(
+    config.reminderIntervalNodes,
+    DEFAULT_REMINDER_INTERVAL_NODES,
+    'reminderIntervalNodes',
+  );
 
   ctx.inject(['sessionProjections'], (projectionCtx) => {
     projectionCtx.sessionProjections.register(todoStackProjection());
@@ -68,8 +89,7 @@ function apply(ctx: Context, config: Config = {}): void {
   ctx.systemPrompt.section({
     name: 'todo-stack:guidance',
     order: 150,
-    text:
-      'Use the todo stack for non-trivial multi-step work. Keep the tree small and outcome-oriented; decompose only when the current work reveals a useful subtask. `push` means descend into new work, `complete` means the focused work is actually done, and `exit` means suspend it without claiming completion. Record abandoned paths as dropped rather than completed. Maintain the stack as work changes, and skip it for trivial one-step requests.',
+    text: TODO_STACK_GUIDANCE,
   });
 
   ctx.systemPrompt.context({
@@ -79,6 +99,19 @@ function apply(ctx: Context, config: Config = {}): void {
       const agent: Agent | undefined = assembly.agent;
       if (agent === undefined) return '';
       return renderTodoStackContext(stateFor(ctx, agent.session), contextChildren);
+    },
+  });
+
+  ctx.systemPrompt.context({
+    name: TODO_STACK_REMINDER_CONTEXT_NAME,
+    order: 151,
+    text: (assembly: AssembleContext) => {
+      const agent: Agent | undefined = assembly.agent;
+      if (agent === undefined) return '';
+      return buildTodoStackReminderContext({
+        session: agent.session,
+        reminderIntervalNodes,
+      });
     },
   });
 }

@@ -5,6 +5,8 @@ import {
   foldTodoStack,
   makeTodoStackCarrier,
   mutateTodoStack,
+  resolveTodoNodeId,
+  todoNodeRef,
 } from './state.ts';
 import type { TodoStackMutation } from './state.ts';
 import {
@@ -25,6 +27,18 @@ interface RuntimeContext {
       values: { todoStack?: TodoStackState };
     };
   } | undefined;
+}
+
+const CHILD_REMINDER = 'Add and focus one direct child now, unless the focused task will finish in the next few actions or has no distinct child worth tracking. A useful hierarchy of short tasks helps the user understand your progress; keep each node to one short outcome.';
+
+function renderToolValue(_args: unknown, value: JsonValue): Array<{ type: 'text'; text: string }> {
+  const focusId = typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value.focusId
+    : null;
+  return [{
+    type: 'text',
+    text: JSON.stringify(value) + (typeof focusId === 'string' ? '\n\n' + CHILD_REMINDER : ''),
+  }];
 }
 
 interface SessionLike {
@@ -51,12 +65,12 @@ function optionalString(value: unknown): string | undefined {
 function toMutation(args: Record<string, unknown>): TodoStackMutation {
   const action = args.action;
   if (action === 'push') {
-    return { action, title: requireString(args.title, 'title') };
+    return { action, content: requireString(args.content, 'content') };
   }
   if (action === 'add') {
     const mutation: TodoStackMutation = {
       action,
-      title: requireString(args.title, 'title'),
+      content: requireString(args.content, 'content'),
     };
     if (Object.hasOwn(args, 'parent_id')) {
       mutation.parentId = args.parent_id === null ? null : requireString(args.parent_id, 'parent_id');
@@ -69,11 +83,11 @@ function toMutation(args: Record<string, unknown>): TodoStackMutation {
     return { action, id: requireString(args.id, 'id') };
   }
   if (action === 'exit' || action === 'complete') return { action };
-  if (action === 'rename') {
+  if (action === 'edit') {
     return {
       action,
       id: requireString(args.id, 'id'),
-      title: requireString(args.title, 'title'),
+      content: requireString(args.content, 'content'),
     };
   }
   if (action === 'move') {
@@ -99,10 +113,51 @@ function toMutation(args: Record<string, unknown>): TodoStackMutation {
   throw new Error(`unknown todo stack action ${JSON.stringify(action)}`);
 }
 
+function resolveMutationReferences(
+  state: TodoStackState,
+  mutation: TodoStackMutation,
+): TodoStackMutation {
+  switch (mutation.action) {
+    case 'push':
+    case 'exit':
+    case 'complete':
+      return mutation;
+    case 'add':
+      return {
+        ...mutation,
+        ...(typeof mutation.parentId === 'string'
+          ? { parentId: resolveTodoNodeId(state, mutation.parentId) }
+          : {}),
+        ...(mutation.afterId === undefined
+          ? {}
+          : { afterId: resolveTodoNodeId(state, mutation.afterId) }),
+      };
+    case 'focus':
+    case 'edit':
+    case 'reopen':
+      return { ...mutation, id: resolveTodoNodeId(state, mutation.id) };
+    case 'move':
+      return {
+        ...mutation,
+        id: resolveTodoNodeId(state, mutation.id),
+        parentId: mutation.parentId === null
+          ? null
+          : resolveTodoNodeId(state, mutation.parentId),
+        ...(mutation.afterId === undefined
+          ? {}
+          : { afterId: resolveTodoNodeId(state, mutation.afterId) }),
+      };
+    case 'drop':
+      return mutation.id === undefined
+        ? mutation
+        : { ...mutation, id: resolveTodoNodeId(state, mutation.id) };
+  }
+}
+
 function compactNode(node: TodoNodeView): JsonValue {
   return {
     id: node.id,
-    title: node.title,
+    content: node.content,
     parentId: node.parentId,
     status: node.status,
     focused: node.focused,
@@ -115,14 +170,14 @@ function mutationResult(state: TodoStackState, action: string, affectedId: strin
   return {
     action,
     revision: state.revision,
-    affectedId,
-    focusId: state.focusId,
+    affectedId: affectedId === null ? null : todoNodeRef(state, affectedId),
+    focusId: state.focusId === null ? null : todoNodeRef(state, state.focusId),
     path: focusPath(state).map(compactNode),
     children: focus === undefined
       ? []
       : focus.children.map((id) => ({
-          id,
-          title: state.nodes[id].title,
+          id: todoNodeRef(state, id),
+          content: state.nodes[id].content,
           status: state.nodes[id].status,
         })),
     counts: {
@@ -136,7 +191,7 @@ function mutationResult(state: TodoStackState, action: string, affectedId: strin
 const GET_PARAMETERS = {
   root_id: {
     type: 'string',
-    description: 'Optional subtree root id. Omit to read all roots.',
+    description: 'Optional subtree root id or unique legacy-id prefix. Omit to read all roots.',
   },
   depth: {
     type: 'integer',
@@ -161,24 +216,24 @@ const UPDATE_PARAMETERS = {
   action: {
     type: 'string',
     required: true,
-    enum: ['push', 'add', 'focus', 'exit', 'complete', 'rename', 'move', 'drop', 'reopen'],
+    enum: ['push', 'add', 'focus', 'exit', 'complete', 'edit', 'move', 'drop', 'reopen'],
     description: 'One atomic stack or tree mutation.',
   },
-  title: {
+  content: {
     type: 'string',
-    description: 'Required by push, add, and rename.',
+    description: 'A short core task anchor, preferably one concise outcome phrase. Include only the objective and a distinguishing constraint, never plans, progress, evidence, notes, or handoff detail. Required by push, add, and edit.',
   },
   id: {
     type: 'string',
-    description: 'Target node id for focus, rename, move, reopen, or optional drop.',
+    description: 'Target node id or unique legacy-id prefix for focus, edit, move, reopen, or optional drop.',
   },
   parent_id: {
     oneOf: [{ type: 'string' }, { type: 'null' }],
-    description: 'Destination parent for move; optional parent for add. Null means a root.',
+    description: 'Destination parent id or unique legacy-id prefix for move; optional parent for add. Null means a root.',
   },
   after_id: {
     type: 'string',
-    description: 'Optional sibling after which add or move inserts the node.',
+    description: 'Optional sibling id or unique legacy-id prefix after which add or move inserts the node.',
   },
 } as const;
 
@@ -186,11 +241,11 @@ export function createGetTodoStackTool(ctx: RuntimeContext, settings: TodoStackR
   return defineTool({
     name: 'get_todo_stack',
     description:
-      'Read the persistent task tree and current focus path. Use subtree and depth limits to inspect only the branch you need. The returned revision is the compare-and-set value for update_todo_stack.',
+      'Read the persistent task tree when the injected current branch is insufficient. Returns the revision required by update_todo_stack.',
     parameters: GET_PARAMETERS,
     output: {
       schema: { type: 'json' },
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+      render: renderToolValue,
     },
     isConcurrencySafe: () => true,
     async execute(args, exec) {
@@ -220,11 +275,11 @@ export function createUpdateTodoStackTool(ctx: RuntimeContext, settings: TodoSta
   return defineTool({
     name: 'update_todo_stack',
     description:
-      'Apply one atomic mutation to the persistent task tree. push creates a child of the current focus and enters it; exit returns to the parent without finishing; complete finishes the focus and returns to the parent, and fails while pending descendants remain. add creates without moving focus. focus enters existing pending work. drop abandons a pending subtree; reopen restores one ended node after its ancestors are pending. Use the exact current expected_revision; on a stale revision, read again before retrying.',
+      'Apply one todo-tree mutation. push creates and focuses current work; add records non-current work; complete finishes verified focus; exit suspends it. Keep content to one short outcome and use the exact current revision.',
     parameters: UPDATE_PARAMETERS,
     output: {
       schema: { type: 'json' },
-      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
+      render: renderToolValue,
     },
     async execute(args, exec) {
       if (!exec.agent) throw new Error('update_todo_stack requires an owning agent session');
@@ -238,7 +293,7 @@ export function createUpdateTodoStackTool(ctx: RuntimeContext, settings: TodoSta
           `stale todo stack revision: expected ${args.expected_revision}, current is ${current.revision}; read the stack and retry`,
         );
       }
-      const mutation = toMutation(args);
+      const mutation = resolveMutationReferences(current, toMutation(args));
       const result = mutateTodoStack(current, mutation, { maxNodes: settings.maxNodes });
       const carrier = makeTodoStackCarrier(mutation.action, result.state);
       session.append('todo/write', carrier);

@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { installModelSelection } from '@deepseek-ai/dsh-agent';
+import { defineTool } from '@deepseek-ai/dsh-tools';
 
 import {
   foldTodoStack,
@@ -14,9 +15,10 @@ import type { TodoStackState } from '../lib/types.ts';
 const name = 'todo-stack-e2e-runner';
 const inject = ['agentDefaultModel', 'agents', 'sessionProjections', 'sessions', 'tools'];
 
-const ROOT_TITLE = 'E2E root cobalt 771';
-const CHILD_TITLE = 'E2E child gamma 194';
-const ALLOWED_TOOLS = ['get_todo_stack', 'update_todo_stack'];
+const ROOT_CONTENT = 'E2E root cobalt 771';
+const CHILD_CONTENT = 'E2E child gamma 194';
+const PROBE_TOOL_NAME = 'todo_stack_e2e_probe';
+const ALLOWED_TOOLS = ['get_todo_stack', 'update_todo_stack', PROBE_TOOL_NAME];
 
 function todoWrites(session: any): any[] {
   return session.events.filter((event: any) =>
@@ -49,6 +51,21 @@ function runtimeContextSections(session: any): any[] {
   });
 }
 
+function runtimeContextMessages(session: any): any[] {
+  return session.events.filter((event: any) =>
+    event.type === 'user/message'
+      && event.data?.source?.kind === 'plugin'
+      && event.data.source.plugin === '@deepseek-ai/dsh-system-prompt');
+}
+
+function toolResultsFor(session: any, name: string): any[] {
+  const callIds = new Set(session.events
+    .filter((event: any) => event.type === 'tool/call' && event.data?.name === name)
+    .map((event: any) => event.data.callId));
+  return session.events.filter((event: any) =>
+    event.type === 'tool/result' && callIds.has(event.data?.message?.source?.callId));
+}
+
 function projectedState(projections: any, session: any): TodoStackState {
   const snapshot = projections.snapshot(session);
   const state = snapshot.values.todoStack;
@@ -72,6 +89,16 @@ function assertRuntimeRevision(session: any, revision: number, phase: string): v
     runtimeContextSections(session).some((section: any) => section.text.includes(expected)),
     `${phase}: no durable runtime-context snapshot exposed revision ${revision}`,
   );
+}
+
+function assertTodoContextAbsent(session: any, phase: string): void {
+  const latest = runtimeContextMessages(session).at(-1);
+  assert.ok(latest, `${phase}: no durable runtime-context update cleared the todo stack`);
+  const text = latest.data.content
+    .filter((block: any) => block.type === 'text')
+    .map((block: any) => block.text)
+    .join('');
+  assert.ok(!text.includes('<todo-stack revision='), `${phase}: ended todo stack remains in runtime context`);
 }
 
 function assertVisibleTools(session: any, phase: string): void {
@@ -103,6 +130,18 @@ async function run(ctx: any): Promise<void> {
   }
 
   const selection = defaultModel.currentSelection();
+  let probeCalls = 0;
+  ctx.tools.register(defineTool({
+    name: PROBE_TOOL_NAME,
+    description: 'Deterministic external-tool probe for the todo-stack reminder E2E.',
+    parameters: {},
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
+    isConcurrencySafe: () => false,
+    async execute() {
+      probeCalls += 1;
+      return 'probe complete; do not call this probe again. Continue with the requested update_todo_stack call.';
+    },
+  }));
   const setup = (agentCtx: any) => {
     installModelSelection(agentCtx, {
       current: { ...selection },
@@ -113,7 +152,7 @@ async function run(ctx: any): Promise<void> {
     agentCtx.systemPrompt.section({
       name: 'todo-stack:e2e-protocol',
       order: 149,
-      text: 'This session is a deterministic todo-stack integration test. Follow each user-requested tool sequence exactly, use the supplied revisions and ids literally, perform no extra tree mutations, and stop after the requested calls.',
+      text: 'This session is a deterministic todo-stack integration test. Follow each user-requested tool sequence exactly, use the supplied revisions and ids literally, perform no extra tree mutations, and stop after the requested calls. Runtime-context snapshots and reminders continue the same sequence: never restart it or repeat a tool call that already has a result.',
     });
   };
 
@@ -132,27 +171,36 @@ async function run(ctx: any): Promise<void> {
 
     await followup(
       liveAgent,
-      `Call update_todo_stack exactly once with expected_revision 0, action "push", and title "${ROOT_TITLE}". Then reply briefly without calling another tool.`,
+      `Call ${PROBE_TOOL_NAME} exactly once. After it returns, call update_todo_stack exactly once with expected_revision 0, action "push", and content "${ROOT_CONTENT}". Then reply briefly without calling another tool.`,
     );
     logPhase(liveAgent.session, 'root-turn');
     let state = projectedState(projections, liveAgent.session);
     assert.equal(state.revision, 1, 'root push must produce revision 1');
     assert.equal(state.roots.length, 1, 'root push must create one root');
     const rootId = state.roots[0];
-    assert.equal(state.nodes[rootId]?.title, ROOT_TITLE);
+    assert.equal(rootId, 't1', 'the first durable node must use the compact id t1');
+    assert.equal(state.nodes[rootId]?.content, ROOT_CONTENT);
     assert.equal(state.focusId, rootId);
+    assert.equal(probeCalls, 1, 'external probe must run exactly once');
     assertOperations(liveAgent.session, ['push'], 'root turn');
     assertRuntimeRevision(liveAgent.session, 1, 'root turn');
+    const updateResult = toolResultsFor(liveAgent.session, 'update_todo_stack').at(-1);
+    assert.ok(updateResult, 'todo-stack update did not produce a durable tool result');
+    const updateResultText = JSON.stringify(updateResult.data.message.content);
+    assert.match(updateResultText, /Add and focus one direct child now/);
+    assert.match(updateResultText, /helps the user understand your progress/);
+    assert.doesNotMatch(updateResultText, new RegExp(PROBE_TOOL_NAME));
 
     await followup(
       liveAgent,
-      `Perform exactly these two update_todo_stack calls in order. First: expected_revision 1, action "push", title "${CHILD_TITLE}". After that succeeds, second: expected_revision 2, action "exit". Then reply briefly and make no other tool call.`,
+      `Perform exactly these two update_todo_stack calls in order. First: expected_revision 1, action "push", content "${CHILD_CONTENT}". After that succeeds, second: expected_revision 2, action "exit". Then reply briefly and make no other tool call.`,
     );
     state = projectedState(projections, liveAgent.session);
     const childId = state.nodes[rootId]?.children[0];
     assert.ok(childId, 'child push must create a child under the root');
+    assert.equal(childId, 't2', 'the second durable node must use the compact id t2');
     assert.equal(state.revision, 3);
-    assert.equal(state.nodes[childId]?.title, CHILD_TITLE);
+    assert.equal(state.nodes[childId]?.content, CHILD_CONTENT);
     assert.equal(state.focusId, rootId, 'exit must return focus to the root');
     assertOperations(liveAgent.session, ['push', 'push', 'exit'], 'nested turn');
     assertRuntimeRevision(liveAgent.session, 3, 'nested turn');
@@ -212,7 +260,7 @@ async function run(ctx: any): Promise<void> {
     assert.equal(state.nodes[rootId]?.status, 'completed');
     assert.equal(state.focusId, null);
     assertOperations(recoveryHandle.agent.session, ['push', 'push', 'exit', 'focus', 'complete', 'complete'], 'root completion');
-    assertRuntimeRevision(recoveryHandle.agent.session, 6, 'root completion');
+    assertTodoContextAbsent(recoveryHandle.agent.session, 'root completion');
     assertVisibleTools(recoveryHandle.agent.session, 'recovered session');
 
     const expectedSeq = recoveryHandle.agent.session.seq;

@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import type { TodoItem } from '@deepseek-ai/dsh-session';
 
 import {
@@ -15,7 +13,7 @@ import type {
   TodoStackState,
 } from './types.ts';
 
-export const MAX_TITLE_CHARS = 240;
+export const MAX_CONTENT_CHARS = 240;
 export const MAX_TREE_DEPTH = 64;
 
 const OPERATIONS = new Set<TodoStackOperation>([
@@ -24,7 +22,7 @@ const OPERATIONS = new Set<TodoStackOperation>([
   'focus',
   'exit',
   'complete',
-  'rename',
+  'edit',
   'move',
   'drop',
   'reopen',
@@ -37,12 +35,12 @@ const STATUSES = new Set<TodoNodeStatus>([
 ]);
 
 export type TodoStackMutation =
-  | { action: 'push'; title: string }
-  | { action: 'add'; title: string; parentId?: string | null; afterId?: string }
+  | { action: 'push'; content: string }
+  | { action: 'add'; content: string; parentId?: string | null; afterId?: string }
   | { action: 'focus'; id: string }
   | { action: 'exit' }
   | { action: 'complete' }
-  | { action: 'rename'; id: string; title: string }
+  | { action: 'edit'; id: string; content: string }
   | { action: 'move'; id: string; parentId: string | null; afterId?: string }
   | { action: 'drop'; id?: string }
   | { action: 'reopen'; id: string };
@@ -63,6 +61,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function fail(message: string): never {
   throw new Error(`invalid todo stack: ${message}`);
+}
+
+function normalizePersistedState(value: unknown): unknown {
+  if (!isRecord(value) || !isRecord(value.nodes)) return value;
+  let changed = false;
+  const nodes: Record<string, unknown> = {};
+  for (const [id, candidate] of Object.entries(value.nodes)) {
+    if (!isRecord(candidate) || !Object.hasOwn(candidate, 'title')) {
+      nodes[id] = candidate;
+      continue;
+    }
+    const { title, ...node } = candidate;
+    if (node.content === undefined && typeof title === 'string') node.content = title;
+    nodes[id] = node;
+    changed = true;
+  }
+  return changed ? { ...value, nodes } : value;
 }
 
 export function emptyTodoStack(): TodoStackState {
@@ -101,11 +116,11 @@ export function assertTodoStackState(value: unknown): asserts value is TodoStack
   for (const [key, rawNode] of Object.entries(nodes)) {
     if (!isRecord(rawNode)) fail(`node ${JSON.stringify(key)} must be an object`);
     if (rawNode.id !== key) fail(`node map key ${JSON.stringify(key)} does not match its id`);
-    if (typeof rawNode.title !== 'string' || rawNode.title.length === 0 || rawNode.title.trim() !== rawNode.title) {
-      fail(`node ${JSON.stringify(key)} has an empty or untrimmed title`);
+    if (typeof rawNode.content !== 'string' || rawNode.content.length === 0 || rawNode.content.trim() !== rawNode.content) {
+      fail(`node ${JSON.stringify(key)} has empty or untrimmed content`);
     }
-    if (rawNode.title.length > MAX_TITLE_CHARS) {
-      fail(`node ${JSON.stringify(key)} title exceeds ${MAX_TITLE_CHARS} characters`);
+    if (rawNode.content.length > MAX_CONTENT_CHARS) {
+      fail(`node ${JSON.stringify(key)} content exceeds ${MAX_CONTENT_CHARS} characters`);
     }
     if (rawNode.parentId !== null && typeof rawNode.parentId !== 'string') {
       fail(`node ${JSON.stringify(key)} has an invalid parentId`);
@@ -181,11 +196,13 @@ export function extractTodoStackEnvelope(event: { type: string; data: unknown })
   if (!isRecord(raw)) fail('todoStack carrier field must be an object');
   if (raw.kind !== TODO_STACK_ENVELOPE_KIND) fail('todoStack carrier has an unknown kind');
   if (raw.version !== TODO_STACK_VERSION) fail(`unsupported envelope version ${String(raw.version)}`);
-  if (typeof raw.operation !== 'string' || !OPERATIONS.has(raw.operation as TodoStackOperation)) {
+  const operation = raw.operation === 'rename' ? 'edit' : raw.operation;
+  if (typeof operation !== 'string' || !OPERATIONS.has(operation as TodoStackOperation)) {
     fail(`unknown operation ${JSON.stringify(raw.operation)}`);
   }
-  assertTodoStackState(raw.state);
-  return raw as unknown as TodoStackEnvelope;
+  const state = normalizePersistedState(raw.state);
+  assertTodoStackState(state);
+  return { ...raw, operation, state } as unknown as TodoStackEnvelope;
 }
 
 export function foldTodoStack(events: readonly { type: string; data: unknown }[]): TodoStackState {
@@ -215,11 +232,11 @@ function cloneState(state: TodoStackState): TodoStackState {
   };
 }
 
-function normalizeTitle(title: string): string {
-  const normalized = title.trim();
-  if (normalized.length === 0) throw new Error('todo title must not be empty');
-  if (normalized.length > MAX_TITLE_CHARS) {
-    throw new Error(`todo title must be at most ${MAX_TITLE_CHARS} characters`);
+function normalizeContent(content: string): string {
+  const normalized = content.trim();
+  if (normalized.length === 0) throw new Error('todo content must not be empty');
+  if (normalized.length > MAX_CONTENT_CHARS) {
+    throw new Error(`todo content must be at most ${MAX_CONTENT_CHARS} characters`);
   }
   return normalized;
 }
@@ -228,6 +245,44 @@ function requireNode(state: TodoStackState, id: string): TodoStackNode {
   const node = state.nodes[id];
   if (node === undefined) throw new Error(`todo node ${JSON.stringify(id)} does not exist`);
   return node;
+}
+
+const SHORT_ID_PATTERN = /^t[1-9][0-9]*$/;
+
+function nextTodoId(state: TodoStackState): string {
+  let number = 1;
+  while (state.nodes[`t${number}`] !== undefined) number += 1;
+  return `t${number}`;
+}
+
+/**
+ * Return the stable model-facing reference for one canonical node id.
+ * New nodes already use compact `tN` ids. Legacy ids retain their canonical
+ * identity and are exposed through the shortest unique prefix of at least six
+ * characters, so old sessions do not require a state migration.
+ */
+export function todoNodeRef(state: TodoStackState, id: string): string {
+  requireNode(state, id);
+  if (SHORT_ID_PATTERN.test(id) || id.length <= 6) return id;
+  const ids = Object.keys(state.nodes);
+  for (let length = 6; length < id.length; length += 1) {
+    const prefix = id.slice(0, length);
+    if (ids.every((candidate) => candidate === id || !candidate.startsWith(prefix))) {
+      return prefix;
+    }
+  }
+  return id;
+}
+
+/** Resolve an exact canonical id, compact id, or unambiguous legacy prefix. */
+export function resolveTodoNodeId(state: TodoStackState, reference: string): string {
+  if (state.nodes[reference] !== undefined) return reference;
+  const matches = Object.keys(state.nodes).filter((id) => id.startsWith(reference));
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new Error(`todo node reference ${JSON.stringify(reference)} is ambiguous`);
+  }
+  throw new Error(`todo node ${JSON.stringify(reference)} does not exist`);
 }
 
 function childList(state: TodoStackState, parentId: string | null): string[] {
@@ -299,14 +354,14 @@ export function mutateTodoStack(
     throw new Error('maxNodes must be a positive safe integer');
   }
   const state = cloneState(current);
-  const createId = options.createId ?? randomUUID;
+  const createId = options.createId ?? (() => nextTodoId(state));
   let affectedId: string | null = null;
 
   if (mutation.action === 'push' || mutation.action === 'add') {
     if (Object.keys(state.nodes).length >= options.maxNodes) {
       throw new Error(`todo stack is limited to ${options.maxNodes} nodes`);
     }
-    const title = normalizeTitle(mutation.title);
+    const content = normalizeContent(mutation.content);
     const parentId = mutation.action === 'push'
       ? state.focusId
       : mutation.parentId === undefined ? state.focusId : mutation.parentId;
@@ -317,7 +372,7 @@ export function mutateTodoStack(
     while (state.nodes[id] !== undefined) id = createId();
     state.nodes[id] = {
       id,
-      title,
+      content,
       parentId,
       children: [],
       status: 'pending',
@@ -345,11 +400,11 @@ export function mutateTodoStack(
     focused.status = 'completed';
     state.focusId = focused.parentId;
     affectedId = focused.id;
-  } else if (mutation.action === 'rename') {
+  } else if (mutation.action === 'edit') {
     const node = requireNode(state, mutation.id);
-    const title = normalizeTitle(mutation.title);
-    if (node.title === title) throw new Error('rename would not change the node title');
-    node.title = title;
+    const content = normalizeContent(mutation.content);
+    if (node.content === content) throw new Error('edit would not change the node content');
+    node.content = content;
     affectedId = node.id;
   } else if (mutation.action === 'move') {
     const node = requireNode(state, mutation.id);
@@ -417,7 +472,7 @@ export function todoDockItems(state: TodoStackState): TodoItem[] {
   const seen = new Set<string>();
   return flattenNodes(state).map(({ node, depth }) => {
     const marker = node.status === 'dropped' ? '× ' : state.focusId === node.id ? '▶ ' : '';
-    const base = `${'· '.repeat(depth)}${marker}${node.title}`;
+    const base = `${'· '.repeat(depth)}${marker}${node.content}`;
     const content = seen.has(base) ? `${base} [${node.id.slice(0, 8)}]` : base;
     seen.add(content);
     return {
@@ -444,4 +499,3 @@ export function makeTodoStackCarrier(
     },
   };
 }
-

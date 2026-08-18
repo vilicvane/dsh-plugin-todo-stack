@@ -30,6 +30,10 @@ test('plugin loads through real Cordis services', async () => {
       agentAssembly.contexts.find((context) => context.name === 'todo-stack:focus')?.text,
       '',
     );
+    assert.equal(
+      agentAssembly.contexts.find((context) => context.name === 'todo-stack:reminder')?.text,
+      '',
+    );
 
     const values = ctx.sessionProjections.snapshot(session).values;
     assert.equal(values.todoStack?.revision, 0);

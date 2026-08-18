@@ -7,7 +7,7 @@ export type TodoNodeStatus = 'pending' | 'completed' | 'dropped';
 
 export interface TodoStackNode {
   id: string;
-  title: string;
+  content: string;
   parentId: string | null;
   children: string[];
   status: TodoNodeStatus;
@@ -27,7 +27,7 @@ export type TodoStackOperation =
   | 'focus'
   | 'exit'
   | 'complete'
-  | 'rename'
+  | 'edit'
   | 'move'
   | 'drop'
   | 'reopen';
@@ -46,7 +46,7 @@ export interface TodoStackCarrier {
 
 export interface TodoNodeView {
   id: string;
-  title: string;
+  content: string;
   parentId: string | null;
   status: TodoNodeStatus;
   depth: number;
@@ -75,4 +75,3 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
     todos: TodoItem[] | null;
   }
 }
-

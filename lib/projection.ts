@@ -12,7 +12,7 @@ import type { TodoStackState } from './types.ts';
 
 const todoNodeSchema = z.object({
   id: z.string(),
-  title: z.string(),
+  content: z.string(),
   parentId: z.string().nullable(),
   children: z.array(z.string()),
   status: z.union([z.literal('pending'), z.literal('completed'), z.literal('dropped')]),
@@ -72,4 +72,3 @@ export function todoDockProjection(): ProjectionDefinition<'todos', TodoItem[] |
     stateVersion: 1,
   };
 }
-
