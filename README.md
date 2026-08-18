@@ -20,8 +20,11 @@ lifecycle, parent, or sibling order.
 work is done. `complete` finishes the current focus only when no pending work
 remains below it.
 
-The model guidance is intentionally short: track work beyond a direct answer or
-one trivial action, keep nodes to one outcome, and add a focused direct child
+The model guidance is intentionally short: during the opening turn, create and
+focus a root for work that needs multiple steps or tool calls, using revision
+`0` when no todo context exists. The opening reminder is a transient system
+section rather than a durable transcript snapshot. Keep nodes to one outcome,
+and add a focused direct child
 for the next distinct multi-action piece unless the current task is nearly done
 or has no useful child. A useful hierarchy of short tasks helps the user see
 what the agent is doing and how the work is progressing. Completion is recorded

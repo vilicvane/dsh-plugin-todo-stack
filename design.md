@@ -83,10 +83,15 @@ lazily with `get_todo_stack`; it is not injected into every request. With no
 focus, pending roots form the frontier; when no pending root remains, the
 plugin contributes no todo runtime context.
 
-The prompt is deliberately direct and short. Work beyond a direct answer or one
-trivial action should have a focused task before execution. When the agent is
-about to perform a distinct multi-action piece of focused work, it should add
-and focus one direct child unless the current task will finish in the next few
+The prompt is deliberately direct and short. During a session's opening turn,
+an extra static section asks the agent to create and focus a short root task when
+the request needs multiple steps or tool calls. It disappears after the first
+completed turn or as soon as todo state exists; because it is a system section,
+it does not become a durable runtime-context snapshot in the transcript. The
+empty tree's initial revision is explicitly `0` so the agent can push that task
+without a preliminary read. When the agent is about to perform a distinct
+multi-action piece of focused work, it should add and focus one direct child
+unless the current task will finish in the next few
 actions or there is no distinct child worth tracking. Nodes remain short
 outcome anchors, while a useful hierarchy helps the user understand the current
 work and its progress. Details stay in conversation or workspace. Verified work

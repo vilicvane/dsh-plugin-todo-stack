@@ -26,6 +26,10 @@ test('plugin loads through real Cordis services', async () => {
 
     const session = Session.create(SessionId('session-cordis-smoke'));
     const agentAssembly = await ctx.systemPrompt.assemble({ agent: { session } } as any);
+    assert.match(
+      agentAssembly.sections.find((section) => section.name === 'todo-stack:initial-guidance')?.text ?? '',
+      /create and focus one short root task now/,
+    );
     assert.equal(
       agentAssembly.contexts.find((context) => context.name === 'todo-stack:focus')?.text,
       '',

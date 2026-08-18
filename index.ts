@@ -30,11 +30,17 @@ const DEFAULT_REMINDER_INTERVAL_NODES = 30;
 
 const TODO_STACK_GUIDANCE = [
   '## Todo stack',
-  'For work beyond a direct answer or one trivial action, create or focus one short task before working.',
+  'Before the first non-todo tool call in multi-step or multi-tool work, focus one short task. With no <todo-stack> context, push it at expected_revision 0.',
   'Add and focus a direct child when you are about to do a distinct multi-action piece of work, unless the focused task will finish in the next few actions or has no distinct child worth tracking.',
   'A well-structured stack of short tasks helps the user understand what you are doing and how the work is progressing.',
   'Keep each node to one short outcome; details stay in the conversation and workspace.',
   'Complete verified work, exit suspended work, and leave siblings or ancestors alone unless their state actually changes.',
+].join('\n');
+
+const TODO_STACK_INITIAL_GUIDANCE = [
+  '## Start with todo stack',
+  'If this request will need multiple steps or tool calls, create and focus one short root task now with expected_revision 0. Skip only work that can finish immediately.',
+  'A useful task tree makes your work and progress visible to the user.',
 ].join('\n');
 
 export interface Config {
@@ -61,6 +67,11 @@ function positiveInteger(value: number | undefined, fallback: number, name: stri
 function stateFor(ctx: Context, session: Session): TodoStackState {
   const registry = ctx.get('sessionProjections') as SessionProjectionRegistry | undefined;
   return registry?.snapshot(session).values.todoStack ?? foldTodoStack(session.events);
+}
+
+function isSessionOpening(session: Session, state: TodoStackState): boolean {
+  return state.revision === 0
+    && !session.events.some((event: any) => event?.type === 'turn/end');
 }
 
 function apply(ctx: Context, config: Config = {}): void {
@@ -90,6 +101,17 @@ function apply(ctx: Context, config: Config = {}): void {
     name: 'todo-stack:guidance',
     order: 150,
     text: TODO_STACK_GUIDANCE,
+  });
+
+  ctx.systemPrompt.section({
+    name: 'todo-stack:initial-guidance',
+    order: 151,
+    text: (assembly: AssembleContext) => {
+      const agent: Agent | undefined = assembly.agent;
+      if (agent === undefined) return '';
+      const state = stateFor(ctx, agent.session);
+      return isSessionOpening(agent.session, state) ? TODO_STACK_INITIAL_GUIDANCE : '';
+    },
   });
 
   ctx.systemPrompt.context({

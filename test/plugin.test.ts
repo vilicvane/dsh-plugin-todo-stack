@@ -54,14 +54,22 @@ test('plugin registers tools, projections, and prompt contributions', () => {
   const captured = harness();
   assert.deepEqual([...captured.tools.keys()], ['get_todo_stack', 'update_todo_stack']);
   assert.deepEqual(captured.projections.map((item) => item.key), ['todoStack', 'todos']);
-  assert.equal(captured.sections.length, 1);
+  assert.equal(captured.sections.length, 2);
   assert.equal(captured.contexts.length, 2);
-  const guidance = captured.sections[0].text;
+  const guidance = captured.sections.find((item) => item.name === 'todo-stack:guidance').text;
   assert.match(guidance, /Add and focus a direct child/);
   assert.match(guidance, /unless the focused task will finish in the next few actions/);
   assert.match(guidance, /helps the user understand what you are doing and how the work is progressing/);
   assert.match(guidance, /Keep each node to one short outcome/);
   assert.ok(guidance.length < 700, 'todo-stack guidance should stay concise');
+
+  const initial = captured.sections.find((item) => item.name === 'todo-stack:initial-guidance');
+  const openingSession = Session.create(SessionId('session-initial-guidance'));
+  assert.match(initial.text({ agent: { session: openingSession } }), /create and focus one short root task now/);
+  assert.match(initial.text({ agent: { session: openingSession } }), /visible to the user/);
+  openingSession.append('turn/start', { turn: 1 });
+  openingSession.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  assert.equal(initial.text({ agent: { session: openingSession } }), '');
 });
 
 test('tools mutate a real Session, enforce revisions, and render focus context', async () => {
@@ -78,6 +86,8 @@ test('tools mutate a real Session, enforce revisions, and render focus context',
   }, exec);
   assert.equal(first.revision, 1);
   assert.equal(typeof first.focusId, 'string');
+  const initial = captured.sections.find((item) => item.name === 'todo-stack:initial-guidance');
+  assert.equal(initial.text({ agent: { session } }), '', 'an existing stack suppresses opening guidance');
   const renderedUpdate = update.output.render({}, first).map((block) => block.text).join('\n');
   assert.match(renderedUpdate, /Add and focus one direct child now/);
   assert.match(renderedUpdate, /unless the focused task will finish in the next few actions/);
