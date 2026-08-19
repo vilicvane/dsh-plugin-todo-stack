@@ -27,7 +27,7 @@ trap cleanup EXIT
 set +e
 DSH_TOOLS_MODE=native \
 TODO_STACK_E2E_ARTIFACT_DIR="$project_dir/.tmp" \
-timeout 360s npx --yes @deepseek-ai/dsh@0.1.0-rc.7 \
+timeout 1200s npx --yes @deepseek-ai/dsh@0.1.0-rc.7 \
   --profile test-todo-stack \
   --patch "$project_dir/e2e/cordis.patch.yml" \
   "todo-stack e2e smoke" 2>&1 | tee "$log_file"

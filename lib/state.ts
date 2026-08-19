@@ -77,7 +77,42 @@ function normalizePersistedState(value: unknown): unknown {
     nodes[id] = node;
     changed = true;
   }
-  return changed ? { ...value, nodes } : value;
+  let focusId = value.focusId;
+  if (focusId === null) {
+    const pendingId = firstPersistedPendingFocus(nodes, value.roots);
+    if (pendingId !== null) {
+      focusId = pendingId;
+      changed = true;
+    }
+  }
+  return changed ? { ...value, nodes, focusId } : value;
+}
+
+/** Repair pre-invariant snapshots that retained pending work without a focus. */
+function firstPersistedPendingFocus(
+  nodes: Record<string, unknown>,
+  roots: unknown,
+): string | null {
+  if (!Array.isArray(roots)) return null;
+  const visited = new Set<string>();
+  const descend = (id: unknown): string | null => {
+    if (typeof id !== 'string' || visited.has(id)) return null;
+    visited.add(id);
+    const node = nodes[id];
+    if (!isRecord(node) || node.status !== 'pending') return null;
+    if (Array.isArray(node.children)) {
+      for (const childId of node.children) {
+        const pending = descend(childId);
+        if (pending !== null) return pending;
+      }
+    }
+    return id;
+  };
+  for (const rootId of roots) {
+    const pending = descend(rootId);
+    if (pending !== null) return pending;
+  }
+  return null;
 }
 
 export function emptyTodoStack(): TodoStackState {
@@ -186,6 +221,12 @@ export function assertTodoStackState(value: unknown): asserts value is TodoStack
     const focused = nodes[value.focusId] as unknown as TodoStackNode | undefined;
     if (focused === undefined) fail(`focus ${JSON.stringify(value.focusId)} does not exist`);
     if (focused.status !== 'pending') fail('focus must point to a pending node');
+  }
+  const hasPending = Object.values(nodes).some(
+    (node) => (node as unknown as TodoStackNode).status === 'pending',
+  );
+  if (hasPending !== (value.focusId !== null)) {
+    fail('focus must exist exactly while pending work exists');
   }
 }
 
@@ -338,6 +379,31 @@ function subtreeHasPending(state: TodoStackState, rootId: string): boolean {
   return false;
 }
 
+function firstPendingFocus(state: TodoStackState): string | null {
+  const descend = (id: string): string | null => {
+    const node = requireNode(state, id);
+    if (node.status !== 'pending') return null;
+    for (const childId of node.children) {
+      const pending = descend(childId);
+      if (pending !== null) return pending;
+    }
+    return id;
+  };
+  for (const rootId of state.roots) {
+    const pending = descend(rootId);
+    if (pending !== null) return pending;
+  }
+  return null;
+}
+
+function fallbackFocus(state: TodoStackState, preferredParentId: string | null): string | null {
+  if (preferredParentId !== null) {
+    const parent = requireNode(state, preferredParentId);
+    if (parent.status === 'pending') return parent.id;
+  }
+  return firstPendingFocus(state);
+}
+
 function finalizeMutation(state: TodoStackState, previousRevision: number): TodoStackState {
   state.revision = previousRevision + 1;
   assertTodoStackState(state);
@@ -378,7 +444,7 @@ export function mutateTodoStack(
       status: 'pending',
     };
     insertPlacement(state, id, parentId, mutation.action === 'add' ? mutation.afterId : undefined);
-    if (mutation.action === 'push') state.focusId = id;
+    if (mutation.action === 'push' || state.focusId === null) state.focusId = id;
     affectedId = id;
   } else if (mutation.action === 'focus') {
     const node = requireNode(state, mutation.id);
@@ -389,6 +455,9 @@ export function mutateTodoStack(
   } else if (mutation.action === 'exit') {
     if (state.focusId === null) throw new Error('todo stack has no current focus to exit');
     const focused = requireNode(state, state.focusId);
+    if (focused.parentId === null) {
+      throw new Error('cannot exit a pending root; complete or drop it, or focus another pending task');
+    }
     affectedId = focused.id;
     state.focusId = focused.parentId;
   } else if (mutation.action === 'complete') {
@@ -398,7 +467,7 @@ export function mutateTodoStack(
       throw new Error('cannot complete a node while its subtree contains pending work');
     }
     focused.status = 'completed';
-    state.focusId = focused.parentId;
+    state.focusId = fallbackFocus(state, focused.parentId);
     affectedId = focused.id;
   } else if (mutation.action === 'edit') {
     const node = requireNode(state, mutation.id);
@@ -437,7 +506,7 @@ export function mutateTodoStack(
       pending.push(...currentNode.children);
     }
     if (state.focusId !== null && isInSubtree(state, id, state.focusId)) {
-      state.focusId = node.parentId;
+      state.focusId = fallbackFocus(state, node.parentId);
     }
     affectedId = id;
   } else if (mutation.action === 'reopen') {
@@ -447,6 +516,7 @@ export function mutateTodoStack(
       throw new Error('reopen the node ancestors before reopening this node');
     }
     node.status = 'pending';
+    if (state.focusId === null) state.focusId = node.id;
     affectedId = node.id;
   }
 

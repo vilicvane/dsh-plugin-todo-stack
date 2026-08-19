@@ -20,6 +20,8 @@ the focus records where the agent is working now.
   remain canonical in restored sessions and are addressed through a unique
   displayed prefix; exact ids continue to work.
 - `in_progress` is not stored. The single `focusId` is the execution pointer.
+- `focusId` is non-null exactly while pending work exists. A blocker or wait
+  state does not suspend focus; focus clears only when no pending node remains.
 - Parent progress is derived from descendants rather than stored separately.
 - Completed and dropped nodes remain in the tree; the MVP does not hard-delete
   task history.
@@ -29,16 +31,21 @@ the focus records where the agent is working now.
 
 - `push`: create a child below the focus and focus it. With no focus, create a
   root.
-- `exit`: move focus to the parent without changing lifecycle status.
-- `complete`: complete the focus and move to its parent. Pending descendants
-  make completion fail.
+- `exit`: move focus to the pending parent without changing lifecycle status.
+  Exiting a root is invalid because it would leave pending work unfocused.
+- `complete`: complete the focus and prefer its pending parent as the next
+  focus. If it has no pending parent, select another pending branch
+  deterministically. Pending descendants make completion fail.
 - `focus`: enter an existing pending node.
 
 `add`, `edit`, `move`, `drop`, and `reopen` maintain the surrounding tree.
 `edit` replaces only one node's `content`; structural and lifecycle changes use
 their dedicated operations.
-Dropping a subtree marks every non-completed node in it dropped. Reopening is
-top-down: ancestors must already be pending.
+Dropping a subtree marks every non-completed node in it dropped and selects
+another pending focus when necessary. Reopening is top-down: ancestors must
+already be pending, and reopening an ended tree restores focus. Historical
+snapshots that contain pending work with no focus are normalized to their first
+pending leaf when read.
 
 ## Persistence
 
@@ -71,17 +78,20 @@ tools expose only the current vocabulary.
 
 ## Model context
 
-Every prompt assembly receives a focus-local tree view rather than a tree
-summary. Ancestors show only the active branch. At the working frontier, the
-focus node's direct children are shown; when focus is a leaf, its siblings are
-shown instead. Only a focused leaf carries the `（进行中）` annotation. Completing
-or exiting work moves focus upward, so the next snapshot naturally exposes the
-new level's siblings. A bounded window always retains the focused leaf.
+At the start of each turn, prompt assembly receives a focus-local tree view
+rather than a tree summary. Ancestors show only the active branch. At the
+working frontier, the focus node's direct children are shown; when focus is a
+leaf, its siblings are shown instead. Only a focused leaf carries the
+`（进行中）` annotation. The injected view remains stable until the first todo
+mutation in that turn, then clears. Every todo mutation result carries the newly
+rendered live branch, so repeated edits do not create updated or stale context
+snapshots; the next turn refreshes the injected view.
+Completing or exiting child work moves focus upward, so the next view exposes
+the new level's siblings. A bounded window always retains the focused leaf.
 
 Global counts and unrelated branches are omitted. The complete tree is read
-lazily with `get_todo_stack`; it is not injected into every request. With no
-focus, pending roots form the frontier; when no pending root remains, the
-plugin contributes no todo runtime context.
+lazily with `get_todo_stack`; it is not injected into every request. When no
+pending node remains, the plugin contributes no todo runtime context.
 
 The prompt is deliberately direct and short. During a session's opening turn,
 an extra static section asks the agent to create and focus a short root task when
@@ -97,14 +107,16 @@ unless the current task will finish in the next few
 actions or there is no distinct child worth tracking. Nodes remain short
 outcome anchors, while a useful hierarchy helps the user understand the current
 work and its progress. Details stay in conversation or workspace. Verified work
-is completed. Focused work blocked on user or external input is exited before
-the agent answers; pending status alone does not suspend focus. Unrelated
-siblings and ancestors are left unchanged.
+is completed. Focused work blocked on user or external input remains focused
+while the agent asks for what is needed. Unrelated siblings and ancestors are
+left unchanged.
 
 Two transient reminders reinforce that policy without changing persistent todo
-state. Every todo-stack tool result directly appends one short instruction to
-add and focus a child unless the focused task is nearly finished or has no
-distinct child worth tracking; results from other tools contain no such text.
+state. Every todo mutation result directly includes the updated focus-local
+tree and appends one short instruction to retain focus and add a child when it
+would make current work clearer, unless the focused task is nearly finished or
+has no distinct child worth tracking. Read results repeat the same maintenance
+instruction when a focus exists; results from other tools contain no such text.
 No dynamic system-prompt scan is involved. At 30, 60, 90, ... append-origin
 model-visible nodes in an open turn, a one-request checkpoint asks whether the
 agent thinks updating the current branch would make the work and progress
@@ -118,8 +130,9 @@ is proactive; creating, editing, moving, or polishing siblings and ancestors
 is not. Surrounding structure changes only when its objective, relationship, or
 lifecycle genuinely changes, or when the user requests maintenance. This keeps
 the tree small and outcome-oriented instead of growing a speculative exhaustive
-plan. `complete` means verified completion; `exit` means suspension; `drop`
-records an abandoned branch. Work completed in one immediate step needs no node.
+plan. `complete` means verified completion; `exit` means returning to a pending
+parent; `drop` records an abandoned branch. Work completed in one immediate
+step needs no node.
 
 ## Web surface
 

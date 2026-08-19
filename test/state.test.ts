@@ -8,6 +8,7 @@ import {
 } from '@deepseek-ai/dsh-session';
 
 import {
+  assertTodoStackState,
   emptyTodoStack,
   foldTodoStack,
   makeTodoStackCarrier,
@@ -85,6 +86,58 @@ test('push, exit, focus, and complete preserve stack semantics', () => {
   assert.equal(state.focusId, null);
   assert.equal(state.nodes.root.status, 'completed');
   assert.equal(state.revision, 6);
+});
+
+test('pending work always retains one deterministic focus', () => {
+  let state = mutateTodoStack(emptyTodoStack(), {
+    action: 'add',
+    content: 'First root',
+    parentId: null,
+  }, {
+    maxNodes: 20,
+    createId: ids('first'),
+  }).state;
+  assert.equal(state.focusId, 'first', 'the first pending add becomes the focus');
+
+  state = mutateTodoStack(state, {
+    action: 'add',
+    content: 'Second root',
+    parentId: null,
+  }, {
+    maxNodes: 20,
+    createId: ids('second'),
+  }).state;
+  assert.throws(
+    () => mutateTodoStack(state, { action: 'exit' }, { maxNodes: 20 }),
+    /cannot exit a pending root/,
+  );
+
+  state = mutateTodoStack(state, { action: 'complete' }, { maxNodes: 20 }).state;
+  assert.equal(state.nodes.first.status, 'completed');
+  assert.equal(state.focusId, 'second', 'completion selects another pending branch');
+
+  state = mutateTodoStack(state, { action: 'drop' }, { maxNodes: 20 }).state;
+  assert.equal(state.focusId, null, 'focus clears only after all pending work ends');
+  state = mutateTodoStack(state, { action: 'reopen', id: 'first' }, { maxNodes: 20 }).state;
+  assert.equal(state.focusId, 'first', 'reopening an ended stack restores focus');
+});
+
+test('state invariant rejects pending work without focus', () => {
+  assert.throws(() => assertTodoStackState({
+    version: TODO_STACK_VERSION,
+    revision: 1,
+    roots: ['root'],
+    nodes: {
+      root: {
+        id: 'root',
+        content: 'Pending root',
+        parentId: null,
+        children: [],
+        status: 'pending',
+      },
+    },
+    focusId: null,
+  }), /focus must exist exactly while pending work exists/);
 });
 
 test('complete rejects pending descendants and drop records abandoned work', () => {
@@ -238,6 +291,48 @@ test('legacy durable title and rename metadata normalize to content and edit', (
   assert.equal(folded.nodes.legacy.content, 'Legacy task');
   assert.equal(Object.hasOwn(folded.nodes.legacy, 'title'), false);
   assert.doesNotThrow(() => validateTodoStackHistory(events, (message) => { throw new Error(message); }));
+});
+
+test('legacy pending snapshots without focus restore a focused leaf', () => {
+  const legacy = {
+    todos: [
+      { content: 'Root', status: 'pending' },
+      { content: '· Leaf', status: 'pending' },
+    ],
+    todoStack: {
+      kind: TODO_STACK_ENVELOPE_KIND,
+      version: TODO_STACK_VERSION,
+      operation: 'exit',
+      state: {
+        version: TODO_STACK_VERSION,
+        revision: 1,
+        roots: ['root'],
+        nodes: {
+          root: {
+            id: 'root',
+            content: 'Root',
+            parentId: null,
+            children: ['leaf'],
+            status: 'pending',
+          },
+          leaf: {
+            id: 'leaf',
+            content: 'Leaf',
+            parentId: 'root',
+            children: [],
+            status: 'pending',
+          },
+        },
+        focusId: null,
+      },
+    },
+  };
+  const folded = foldTodoStack([{ type: 'todo/write', data: legacy }]);
+  assert.equal(folded.focusId, 'leaf');
+  assert.doesNotThrow(() => validateTodoStackHistory(
+    [{ type: 'todo/write', data: legacy }],
+    (message) => { throw new Error(message); },
+  ));
 });
 
 test('invariant rejects mismatched compatibility rows and revision gaps', () => {

@@ -26,7 +26,18 @@ function validateCarrier(event: EventLike, previous: TodoStackState, fail: Fail)
     fail(`todo stack revision ${envelope.state.revision} does not follow ${previous.revision}`);
   }
   const rawTodos = (event.data as { todos?: unknown }).todos;
-  if (JSON.stringify(rawTodos) !== JSON.stringify(todoDockItems(envelope.state))) {
+  const expectedTodos = todoDockItems(envelope.state);
+  const rawState = (event.data as any)?.todoStack?.state;
+  const repairedLegacyFocus = rawState?.focusId === null
+    && Object.values(rawState?.nodes ?? {}).some((node: any) => node?.status === 'pending');
+  const legacyExpectedTodos = expectedTodos.map((todo) => todo.status !== 'in_progress'
+    ? todo
+    : {
+        content: todo.content.replace(/^((?:· )*)▶ /, '$1'),
+        status: 'pending' as const,
+      });
+  if (JSON.stringify(rawTodos) !== JSON.stringify(expectedTodos)
+    && (!repairedLegacyFocus || JSON.stringify(rawTodos) !== JSON.stringify(legacyExpectedTodos))) {
     fail('todo/write compatibility list does not match its todoStack snapshot');
   }
   return envelope.state;

@@ -61,8 +61,9 @@ test('plugin registers tools, projections, and prompt contributions', () => {
   assert.match(guidance, /unless the focused task will finish in the next few actions/);
   assert.match(guidance, /makes work and progress visible to the user/);
   assert.match(guidance, /Keep each node to one short outcome/);
-  assert.match(guidance, /call exit before answering; pending does not suspend focus/);
-  assert.ok(guidance.length < 700, 'todo-stack guidance should stay concise');
+  assert.match(guidance, /Keep exactly one task focused whenever pending work exists/);
+  assert.match(guidance, /blockers or waiting for user input do not clear focus/);
+  assert.ok(guidance.length < 800, 'todo-stack guidance should stay concise');
 
   const initial = captured.sections.find((item) => item.name === 'todo-stack:initial-guidance');
   const openingSession = Session.create(SessionId('session-initial-guidance'));
@@ -91,9 +92,11 @@ test('tools mutate a real Session, enforce revisions, and render focus context',
   const initial = captured.sections.find((item) => item.name === 'todo-stack:initial-guidance');
   assert.equal(initial.text({ agent: { session } }), '', 'an existing stack suppresses opening guidance');
   const renderedUpdate = update.output.render({}, first).map((block) => block.text).join('\n');
-  assert.match(renderedUpdate, /Add and focus one direct child now/);
+  assert.match(renderedUpdate, /<todo-stack revision="1">/);
+  assert.match(renderedUpdate, /Add and focus one direct child if/);
   assert.match(renderedUpdate, /unless the focused task will finish in the next few actions/);
-  assert.match(renderedUpdate, /helps the user understand your progress/);
+  assert.match(renderedUpdate, /make the current work and progress clearer to the user/);
+  assert.match(renderedUpdate, /Keep one task focused while pending work remains/);
 
   await assert.rejects(
     update.execute({ expected_revision: 0, action: 'exit' }, exec),
@@ -104,7 +107,7 @@ test('tools mutate a real Session, enforce revisions, and render focus context',
   assert.equal(view.revision, 1);
   assert.equal(view.nodes[0].content, 'Implement feature');
   const renderedRead = read.output.render({}, view).map((block) => block.text).join('\n');
-  assert.match(renderedRead, /Add and focus one direct child now/);
+  assert.match(renderedRead, /Add and focus one direct child if/);
 
   const context = captured.contexts.find((item) => item.name === 'todo-stack:focus')
     .text({ agent: { session } });
@@ -116,6 +119,45 @@ test('tools mutate a real Session, enforce revisions, and render focus context',
   const renderedComplete = update.output.render({}, completed).map((block) => block.text).join('\n');
   assert.doesNotMatch(renderedComplete, /Add and focus one direct child now/,
     'an ended stack should not ask for another child');
+  assert.doesNotMatch(renderedComplete, /<todo-stack revision=/,
+    'an ended stack should not return an empty context block');
+});
+
+test('focus context is frozen for a turn while tool results carry live revisions', async () => {
+  const captured = harness();
+  const session = Session.create(SessionId('session-turn-context-test'));
+  const update = captured.tools.get('update_todo_stack') as CapturedTool;
+  const focusContext = captured.contexts.find((item) => item.name === 'todo-stack:focus');
+  const exec = { agent: { session } };
+
+  session.append('turn/start', { turn: 1 });
+  assert.equal(focusContext.text({ agent: { session } }), '');
+  const root = await update.execute({
+    expected_revision: 0,
+    action: 'push',
+    content: 'Root',
+  }, exec);
+  assert.match(update.output.render({}, root)[0].text, /<todo-stack revision="1">/);
+  assert.equal(
+    focusContext.text({ agent: { session } }),
+    '',
+    'a mutation must not create another injected snapshot in the same turn',
+  );
+
+  session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  session.append('turn/start', { turn: 2 });
+  assert.match(focusContext.text({ agent: { session } }), /<todo-stack revision="1">/);
+  const child = await update.execute({
+    expected_revision: 1,
+    action: 'push',
+    content: 'Child',
+  }, exec);
+  assert.match(update.output.render({}, child)[0].text, /<todo-stack revision="2">/);
+  assert.equal(
+    focusContext.text({ agent: { session } }),
+    '',
+    'the turn-start snapshot clears after the first todo mutation',
+  );
 });
 
 test('tools accept the displayed prefix of a legacy node id', async () => {

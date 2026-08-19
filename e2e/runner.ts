@@ -51,19 +51,27 @@ function runtimeContextSections(session: any): any[] {
   });
 }
 
-function runtimeContextMessages(session: any): any[] {
-  return session.events.filter((event: any) =>
-    event.type === 'user/message'
-      && event.data?.source?.kind === 'plugin'
-      && event.data.source.plugin === '@deepseek-ai/dsh-system-prompt');
-}
-
 function toolResultsFor(session: any, name: string): any[] {
   const callIds = new Set(session.events
     .filter((event: any) => event.type === 'tool/call' && event.data?.name === name)
     .map((event: any) => event.data.callId));
   return session.events.filter((event: any) =>
     event.type === 'tool/result' && callIds.has(event.data?.message?.source?.callId));
+}
+
+function toolResultText(result: any): string {
+  const chunks: string[] = [];
+  const visit = (value: any): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (value === null || typeof value !== 'object') return;
+    if (value.type === 'text' && typeof value.text === 'string') chunks.push(value.text);
+    if (Object.hasOwn(value, 'content')) visit(value.content);
+  };
+  visit(result?.data?.message?.content ?? []);
+  return chunks.join('\n');
 }
 
 function projectedState(projections: any, session: any): TodoStackState {
@@ -91,14 +99,29 @@ function assertRuntimeRevision(session: any, revision: number, phase: string): v
   );
 }
 
-function assertTodoContextAbsent(session: any, phase: string): void {
-  const latest = runtimeContextMessages(session).at(-1);
-  assert.ok(latest, `${phase}: no durable runtime-context update cleared the todo stack`);
-  const text = latest.data.content
-    .filter((block: any) => block.type === 'text')
-    .map((block: any) => block.text)
-    .join('');
-  assert.ok(!text.includes('<todo-stack revision='), `${phase}: ended todo stack remains in runtime context`);
+function runtimeRevisionCount(session: any, revision: number): number {
+  const expected = `<todo-stack revision="${revision}">`;
+  return runtimeContextSections(session)
+    .filter((section: any) => section.text.includes(expected))
+    .length;
+}
+
+function assertRuntimeRevisionAbsent(session: any, revision: number, phase: string): void {
+  const expected = `<todo-stack revision="${revision}">`;
+  assert.ok(
+    runtimeContextSections(session).every((section: any) => !section.text.includes(expected)),
+    `${phase}: runtime context unexpectedly exposed live revision ${revision}`,
+  );
+}
+
+function assertUpdateResultRevision(session: any, revision: number, phase: string): void {
+  const result = toolResultsFor(session, 'update_todo_stack').at(-1);
+  assert.ok(result, `${phase}: todo-stack update did not produce a durable tool result`);
+  assert.match(
+    toolResultText(result),
+    new RegExp(`<todo-stack revision="${revision}">`),
+    `${phase}: update result did not expose live revision ${revision}`,
+  );
 }
 
 function assertVisibleTools(session: any, phase: string): void {
@@ -183,12 +206,14 @@ async function run(ctx: any): Promise<void> {
     assert.equal(state.focusId, rootId);
     assert.equal(probeCalls, 1, 'external probe must run exactly once');
     assertOperations(liveAgent.session, ['push'], 'root turn');
-    assertRuntimeRevision(liveAgent.session, 1, 'root turn');
+    assertRuntimeRevisionAbsent(liveAgent.session, 1, 'root turn');
     const updateResult = toolResultsFor(liveAgent.session, 'update_todo_stack').at(-1);
     assert.ok(updateResult, 'todo-stack update did not produce a durable tool result');
-    const updateResultText = JSON.stringify(updateResult.data.message.content);
-    assert.match(updateResultText, /Add and focus one direct child now/);
-    assert.match(updateResultText, /helps the user understand your progress/);
+    const updateResultText = toolResultText(updateResult);
+    assert.match(updateResultText, /<todo-stack revision="1">/);
+    assert.match(updateResultText, /Add and focus one direct child if/);
+    assert.match(updateResultText, /make the current work and progress clearer to the user/);
+    assert.match(updateResultText, /Keep one task focused while pending work remains/);
     assert.doesNotMatch(updateResultText, new RegExp(PROBE_TOOL_NAME));
 
     await followup(
@@ -203,7 +228,14 @@ async function run(ctx: any): Promise<void> {
     assert.equal(state.nodes[childId]?.content, CHILD_CONTENT);
     assert.equal(state.focusId, rootId, 'exit must return focus to the root');
     assertOperations(liveAgent.session, ['push', 'push', 'exit'], 'nested turn');
-    assertRuntimeRevision(liveAgent.session, 3, 'nested turn');
+    assertRuntimeRevision(liveAgent.session, 1, 'nested turn');
+    assert.equal(
+      runtimeRevisionCount(liveAgent.session, 1),
+      1,
+      'nested turn: turn-start context must clear after the first todo mutation',
+    );
+    assertRuntimeRevisionAbsent(liveAgent.session, 3, 'nested turn');
+    assertUpdateResultRevision(liveAgent.session, 3, 'nested turn');
     assertVisibleTools(liveAgent.session, 'live session');
 
     const sessionId = liveAgent.session.id;
@@ -244,7 +276,14 @@ async function run(ctx: any): Promise<void> {
     assert.equal(state.nodes[childId]?.status, 'completed');
     assert.equal(state.focusId, rootId, 'completing the child must return to the root');
     assertOperations(recoveryHandle.agent.session, ['push', 'push', 'exit', 'focus', 'complete'], 'child completion');
-    assertRuntimeRevision(recoveryHandle.agent.session, 5, 'child completion');
+    assertRuntimeRevision(recoveryHandle.agent.session, 3, 'child completion');
+    assert.equal(
+      runtimeRevisionCount(recoveryHandle.agent.session, 3),
+      2,
+      'child completion: get may retain context, but the first mutation must clear it',
+    );
+    assertRuntimeRevisionAbsent(recoveryHandle.agent.session, 5, 'child completion');
+    assertUpdateResultRevision(recoveryHandle.agent.session, 5, 'child completion');
     assert.equal(
       toolCalls(recoveryHandle.agent.session).filter((event: any) => event.data.name === 'get_todo_stack').length,
       1,
@@ -260,7 +299,19 @@ async function run(ctx: any): Promise<void> {
     assert.equal(state.nodes[rootId]?.status, 'completed');
     assert.equal(state.focusId, null);
     assertOperations(recoveryHandle.agent.session, ['push', 'push', 'exit', 'focus', 'complete', 'complete'], 'root completion');
-    assertTodoContextAbsent(recoveryHandle.agent.session, 'root completion');
+    assertRuntimeRevision(recoveryHandle.agent.session, 5, 'root completion');
+    assert.equal(
+      runtimeRevisionCount(recoveryHandle.agent.session, 5),
+      1,
+      'root completion: turn-start context must clear after completion',
+    );
+    const completedResult = toolResultsFor(recoveryHandle.agent.session, 'update_todo_stack').at(-1);
+    assert.ok(completedResult, 'root completion did not produce a tool result');
+    assert.doesNotMatch(
+      toolResultText(completedResult),
+      /<todo-stack revision=/,
+      'an ended stack should not return an empty todo context',
+    );
     assertVisibleTools(recoveryHandle.agent.session, 'recovered session');
 
     const expectedSeq = recoveryHandle.agent.session.seq;

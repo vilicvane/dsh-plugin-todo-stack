@@ -12,6 +12,7 @@ import type { TodoStackMutation } from './state.ts';
 import {
   buildTodoStackView,
   focusPath,
+  renderTodoStackContext,
   todoStackCounts,
 } from './view.ts';
 import type { TodoNodeView, TodoStackState } from './types.ts';
@@ -19,6 +20,7 @@ import type { TodoNodeView, TodoStackState } from './types.ts';
 export interface TodoStackRuntimeSettings {
   maxNodes: number;
   maxReadNodes: number;
+  contextChildren: number;
 }
 
 interface RuntimeContext {
@@ -29,15 +31,26 @@ interface RuntimeContext {
   } | undefined;
 }
 
-const CHILD_REMINDER = 'Add and focus one direct child now, unless the focused task will finish in the next few actions or has no distinct child worth tracking. A useful hierarchy of short tasks helps the user understand your progress; keep each node to one short outcome.';
+const FOCUS_REMINDER = 'Keep one task focused while pending work remains. Add and focus one direct child if that would make the current work and progress clearer to the user, unless the focused task will finish in the next few actions or has no distinct child worth tracking. Keep each node to one short outcome.';
+
+const TOOL_CONTEXT_FIELD = 'todoStackContext';
 
 function renderToolValue(_args: unknown, value: JsonValue): Array<{ type: 'text'; text: string }> {
-  const focusId = typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value.focusId
-    : null;
+  const record = typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value
+    : undefined;
+  const context = record === undefined || typeof record[TOOL_CONTEXT_FIELD] !== 'string'
+    ? ''
+    : record[TOOL_CONTEXT_FIELD];
+  const publicValue = record === undefined
+    ? value
+    : Object.fromEntries(Object.entries(record).filter(([key]) => key !== TOOL_CONTEXT_FIELD));
+  const focusId = record?.focusId;
+  const additions = [context, typeof focusId === 'string' ? FOCUS_REMINDER : '']
+    .filter((item) => item.length > 0);
   return [{
     type: 'text',
-    text: JSON.stringify(value) + (typeof focusId === 'string' ? '\n\n' + CHILD_REMINDER : ''),
+    text: JSON.stringify(publicValue) + (additions.length > 0 ? `\n\n${additions.join('\n\n')}` : ''),
   }];
 }
 
@@ -164,7 +177,12 @@ function compactNode(node: TodoNodeView): JsonValue {
   };
 }
 
-function mutationResult(state: TodoStackState, action: string, affectedId: string | null): JsonValue {
+function mutationResult(
+  state: TodoStackState,
+  action: string,
+  affectedId: string | null,
+  contextChildren: number,
+): JsonValue {
   const focus = state.focusId === null ? undefined : state.nodes[state.focusId];
   const counts = todoStackCounts(state);
   return {
@@ -185,6 +203,7 @@ function mutationResult(state: TodoStackState, action: string, affectedId: strin
       completed: counts.completed,
       dropped: counts.dropped,
     },
+    [TOOL_CONTEXT_FIELD]: renderTodoStackContext(state, contextChildren),
   };
 }
 
@@ -275,7 +294,7 @@ export function createUpdateTodoStackTool(ctx: RuntimeContext, settings: TodoSta
   return defineTool({
     name: 'update_todo_stack',
     description:
-      'Apply one todo-tree mutation. push creates and focuses current work; add records non-current work; complete finishes verified focus; exit suspends it. Keep content to one short outcome and use the exact current revision.',
+      'Apply one todo-tree mutation. Pending work always retains one focus. push creates and focuses current work; add records other work; complete finishes verified focus; exit moves focus to its parent and cannot clear a pending root. Keep content to one short outcome and use the exact current revision.',
     parameters: UPDATE_PARAMETERS,
     output: {
       schema: { type: 'json' },
@@ -297,7 +316,12 @@ export function createUpdateTodoStackTool(ctx: RuntimeContext, settings: TodoSta
       const result = mutateTodoStack(current, mutation, { maxNodes: settings.maxNodes });
       const carrier = makeTodoStackCarrier(mutation.action, result.state);
       session.append('todo/write', carrier);
-      return mutationResult(result.state, mutation.action, result.affectedId);
+      return mutationResult(
+        result.state,
+        mutation.action,
+        result.affectedId,
+        settings.contextChildren,
+      );
     },
     presentCall: (args) => ({
       card: 'generic',

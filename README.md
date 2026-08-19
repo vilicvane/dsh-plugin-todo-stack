@@ -17,8 +17,10 @@ layer. `edit` replaces that anchor and does not change the node id, focus,
 lifecycle, parent, or sibling order.
 
 `push` descends into newly created work. `exit` returns without claiming the
-work is done. `complete` finishes the current focus only when no pending work
-remains below it.
+work is done, but only from a child to its pending parent. `complete` finishes
+the current focus only when no pending work remains below it. As long as any
+pending node exists, exactly one pending node remains focused; blockers and
+waiting for user input do not clear that focus.
 
 The model guidance is intentionally short: during the opening turn, create and
 focus a root for work that needs multiple steps or tool calls, using revision
@@ -45,9 +47,10 @@ The plugin registers:
   lifecycle without encoding UI markers into task titles;
 - a flattened persistent `todos` projection retained as a compatibility
   fallback for clients without the custom dock;
-- dynamic model context containing only the active branch and its current
-  working level;
-- one short direct-child instruction appended to todo-stack tool results;
+- turn-start model context containing only the active branch and its current
+  working level, cleared after the turn's first todo mutation;
+- the live updated branch plus one short focus/direct-child instruction in
+  each todo mutation result;
 - one-request dynamic branch reminders at each 30-node open-turn milestone.
 
 It does not depend on or load `@deepseek-ai/dsh-tool-todo`. Keep the stock
@@ -110,8 +113,9 @@ TODO_STACK_PROMPT_EVAL_RUNS=3 pnpm e2e:prompt
 
 Each repetition creates four independent production-prompt sessions: a tracked
 multi-tool release check, a direct answer that must not create todo state, a
-blocked task that must be suspended, and a subtask below an existing focused
-root. The runner checks tool order, durable tree state, final evidence, and a
+blocked task that must remain pending and focused, and a subtask below an
+existing focused root. The runner checks tool order, durable tree state, final
+evidence, and a
 per-scenario request fingerprint, then reports pass rates with Wilson 95%
 confidence intervals under `.tmp/`. Use
 `TODO_STACK_PROMPT_EVAL_SCENARIOS=blocked_release` to isolate one scenario.

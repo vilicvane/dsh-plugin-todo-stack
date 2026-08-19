@@ -31,10 +31,11 @@ const DEFAULT_REMINDER_INTERVAL_NODES = 30;
 const TODO_STACK_GUIDANCE = [
   '## Todo stack',
   'Before the first non-todo tool call in work beyond one trivial deterministic action, focus one short task. With no <todo-stack> context, push it at expected_revision 0.',
+  'Keep exactly one task focused whenever pending work exists; blockers or waiting for user input do not clear focus.',
   'Add and focus a direct child when you are about to do a distinct multi-action piece of work, unless the focused task will finish in the next few actions or has no distinct child worth tracking.',
   'A short task tree makes work and progress visible to the user.',
   'Keep each node to one short outcome; details stay in the conversation and workspace.',
-  'Complete verified work. If focused work is blocked or awaiting input, call exit before answering; pending does not suspend focus. Leave siblings and ancestors unchanged.',
+  'Complete verified work. Use exit only to return from a child to its pending parent. Leave siblings and ancestors unchanged.',
 ].join('\n');
 
 const TODO_STACK_INITIAL_GUIDANCE = [
@@ -70,6 +71,21 @@ function stateFor(ctx: Context, session: Session): TodoStackState {
   return registry?.snapshot(session).values.todoStack ?? foldTodoStack(session.events);
 }
 
+/** Keep turn-start context only until the first todo mutation; results carry live updates. */
+function contextStateFor(ctx: Context, session: Session): TodoStackState | null {
+  for (let index = session.events.length - 1; index >= 0; index -= 1) {
+    const event: any = session.events[index];
+    if (event?.type === 'turn/end') break;
+    if (event?.type === 'turn/start') {
+      const turnStartState = foldTodoStack(session.events.slice(0, index));
+      return stateFor(ctx, session).revision === turnStartState.revision
+        ? turnStartState
+        : null;
+    }
+  }
+  return stateFor(ctx, session);
+}
+
 function isSessionOpening(session: Session, state: TodoStackState): boolean {
   return state.revision === 0
     && !session.events.some((event: any) => event?.type === 'turn/end');
@@ -95,8 +111,8 @@ function apply(ctx: Context, config: Config = {}): void {
     if (todoDock) projectionCtx.sessionProjections.register(todoDockProjection());
   });
 
-  ctx.tools.register(createGetTodoStackTool(ctx, { maxNodes, maxReadNodes }));
-  ctx.tools.register(createUpdateTodoStackTool(ctx, { maxNodes, maxReadNodes }));
+  ctx.tools.register(createGetTodoStackTool(ctx, { maxNodes, maxReadNodes, contextChildren }));
+  ctx.tools.register(createUpdateTodoStackTool(ctx, { maxNodes, maxReadNodes, contextChildren }));
 
   ctx.systemPrompt.section({
     name: 'todo-stack:guidance',
@@ -121,7 +137,8 @@ function apply(ctx: Context, config: Config = {}): void {
     text: (assembly: AssembleContext) => {
       const agent: Agent | undefined = assembly.agent;
       if (agent === undefined) return '';
-      return renderTodoStackContext(stateFor(ctx, agent.session), contextChildren);
+      const state = contextStateFor(ctx, agent.session);
+      return state === null ? '' : renderTodoStackContext(state, contextChildren);
     },
   });
 

@@ -200,8 +200,6 @@ function evaluateBlocked(
 ): Record<string, CheckResult> {
   const firstProbeSeq = calls.find((call) => call.name === PROBE_TOOL)?.seq ?? Number.POSITIVE_INFINITY;
   const firstTodoSeq = calls.find((call) => call.name === 'update_todo_stack')?.seq ?? Number.POSITIVE_INFINITY;
-  const exitSeq = calls.find((call) => call.name === 'update_todo_stack' && call.arguments?.action === 'exit')?.seq
-    ?? Number.NEGATIVE_INFINITY;
   const actions = calls
     .filter((call) => call.name === 'update_todo_stack')
     .map((call) => String(call.arguments?.action));
@@ -215,15 +213,16 @@ function evaluateBlocked(
       inspected.length === 1 && inspected[0] === 'blocked',
       `observed=${JSON.stringify(inspected)}`,
     ),
-    suspend_after_blocker: check(
-      exitSeq > firstProbeSeq && actions.includes('exit') && !actions.includes('complete'),
-      `probe seq=${firstProbeSeq}, exit seq=${exitSeq}, actions=${JSON.stringify(actions)}`,
+    retain_focus_after_blocker: check(
+      Number.isFinite(firstProbeSeq)
+        && !actions.some((action) => action === 'exit' || action === 'complete' || action === 'drop'),
+      `probe seq=${firstProbeSeq}, actions=${JSON.stringify(actions)}`,
     ),
-    pending_unfocused_task: check(
+    pending_focused_task: check(
       state.roots.length === 1
         && nodes.length === 1
         && nodes[0]?.status === 'pending'
-        && state.focusId === null,
+        && state.focusId === nodes[0]?.id,
       `roots=${state.roots.length}, focus=${state.focusId ?? 'null'}, nodes=${JSON.stringify(nodes)}`,
     ),
     blocker_reported: check(
