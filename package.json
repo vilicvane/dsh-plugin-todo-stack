@@ -20,6 +20,7 @@
     ".": "./index.ts",
     "./client": "./client.js",
     "./e2e-runner": "./e2e/runner.ts",
+    "./prompt-eval-runner": "./e2e/prompt-eval-runner.ts",
     "./invariant": "./invariant.ts",
     "./types": "./lib/types.ts",
     "./package.json": "./package.json"
@@ -80,6 +81,7 @@
     "test": "node --test \"test/*.test.ts\"",
     "typecheck": "tsc --noEmit",
     "check": "pnpm check:client && pnpm test && pnpm typecheck",
-    "e2e": "bash scripts/e2e-smoke.sh"
+    "e2e": "bash scripts/e2e-smoke.sh",
+    "e2e:prompt": "bash scripts/e2e-prompt.sh"
   }
 }

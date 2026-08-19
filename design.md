@@ -85,7 +85,9 @@ plugin contributes no todo runtime context.
 
 The prompt is deliberately direct and short. During a session's opening turn,
 an extra static section asks the agent to create and focus a short root task when
-the request needs multiple steps or tool calls. It disappears after the first
+the request needs any non-todo tool call, except one deterministic call guaranteed
+to finish the request. A call that may block or require follow-up never qualifies
+for that exception. The section disappears after the first
 completed turn or as soon as todo state exists; because it is a system section,
 it does not become a durable runtime-context snapshot in the transcript. The
 empty tree's initial revision is explicitly `0` so the agent can push that task
@@ -95,8 +97,9 @@ unless the current task will finish in the next few
 actions or there is no distinct child worth tracking. Nodes remain short
 outcome anchors, while a useful hierarchy helps the user understand the current
 work and its progress. Details stay in conversation or workspace. Verified work
-is completed, suspended work is exited, and unrelated siblings or ancestors
-are left alone unless their state actually changes.
+is completed. Focused work blocked on user or external input is exited before
+the agent answers; pending status alone does not suspend focus. Unrelated
+siblings and ancestors are left unchanged.
 
 Two transient reminders reinforce that policy without changing persistent todo
 state. Every todo-stack tool result directly appends one short instruction to

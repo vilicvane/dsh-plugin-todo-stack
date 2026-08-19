@@ -30,16 +30,17 @@ const DEFAULT_REMINDER_INTERVAL_NODES = 30;
 
 const TODO_STACK_GUIDANCE = [
   '## Todo stack',
-  'Before the first non-todo tool call in multi-step or multi-tool work, focus one short task. With no <todo-stack> context, push it at expected_revision 0.',
+  'Before the first non-todo tool call in work beyond one trivial deterministic action, focus one short task. With no <todo-stack> context, push it at expected_revision 0.',
   'Add and focus a direct child when you are about to do a distinct multi-action piece of work, unless the focused task will finish in the next few actions or has no distinct child worth tracking.',
-  'A well-structured stack of short tasks helps the user understand what you are doing and how the work is progressing.',
+  'A short task tree makes work and progress visible to the user.',
   'Keep each node to one short outcome; details stay in the conversation and workspace.',
-  'Complete verified work, exit suspended work, and leave siblings or ancestors alone unless their state actually changes.',
+  'Complete verified work. If focused work is blocked or awaiting input, call exit before answering; pending does not suspend focus. Leave siblings and ancestors unchanged.',
 ].join('\n');
 
 const TODO_STACK_INITIAL_GUIDANCE = [
   '## Start with todo stack',
-  'If this request will need multiple steps or tool calls, create and focus one short root task now with expected_revision 0. Skip only work that can finish immediately.',
+  'If this request needs any non-todo tool call, create and focus one short root task now with expected_revision 0 unless one deterministic call is guaranteed to finish it.',
+  'A call that may block or require follow-up never qualifies for that exception.',
   'A useful task tree makes your work and progress visible to the user.',
 ].join('\n');
 

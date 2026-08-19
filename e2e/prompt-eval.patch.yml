@@ -1,0 +1,3 @@
+- insert:
+    - id: todo-stack-prompt-eval-runner
+      name: dsh-plugin-todo-stack/prompt-eval-runner

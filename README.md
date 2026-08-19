@@ -102,6 +102,20 @@ pnpm e2e
 The script writes a compact diagnostic artifact under `.tmp/` and prints its
 path together with the persisted session id.
 
+To evaluate the production prompt rather than a forced tool sequence, run:
+
+```sh
+TODO_STACK_PROMPT_EVAL_RUNS=3 pnpm e2e:prompt
+```
+
+Each repetition creates four independent production-prompt sessions: a tracked
+multi-tool release check, a direct answer that must not create todo state, a
+blocked task that must be suspended, and a subtask below an existing focused
+root. The runner checks tool order, durable tree state, final evidence, and a
+per-scenario request fingerprint, then reports pass rates with Wilson 95%
+confidence intervals under `.tmp/`. Use
+`TODO_STACK_PROMPT_EVAL_SCENARIOS=blocked_release` to isolate one scenario.
+
 ## Configuration
 
 | Setting | Default | Meaning |

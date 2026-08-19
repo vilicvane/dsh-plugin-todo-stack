@@ -59,13 +59,15 @@ test('plugin registers tools, projections, and prompt contributions', () => {
   const guidance = captured.sections.find((item) => item.name === 'todo-stack:guidance').text;
   assert.match(guidance, /Add and focus a direct child/);
   assert.match(guidance, /unless the focused task will finish in the next few actions/);
-  assert.match(guidance, /helps the user understand what you are doing and how the work is progressing/);
+  assert.match(guidance, /makes work and progress visible to the user/);
   assert.match(guidance, /Keep each node to one short outcome/);
+  assert.match(guidance, /call exit before answering; pending does not suspend focus/);
   assert.ok(guidance.length < 700, 'todo-stack guidance should stay concise');
 
   const initial = captured.sections.find((item) => item.name === 'todo-stack:initial-guidance');
   const openingSession = Session.create(SessionId('session-initial-guidance'));
   assert.match(initial.text({ agent: { session: openingSession } }), /create and focus one short root task now/);
+  assert.match(initial.text({ agent: { session: openingSession } }), /may block or require follow-up/);
   assert.match(initial.text({ agent: { session: openingSession } }), /visible to the user/);
   openingSession.append('turn/start', { turn: 1 });
   openingSession.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
