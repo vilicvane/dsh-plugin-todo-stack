@@ -4,6 +4,8 @@ import {
   todoNodeRef,
 } from './state.ts';
 import type {
+  CompleteTodoNodeView,
+  CompleteTodoTreeView,
   TodoNodeView,
   TodoStackCounts,
   TodoStackNode,
@@ -106,6 +108,25 @@ export function buildTodoStackView(state: TodoStackState, options: ViewOptions =
     nodes,
     counts: todoStackCounts(state),
     truncated,
+  };
+}
+
+export function buildCompleteTodoTree(state: TodoStackState): CompleteTodoTreeView {
+  assertTodoStackState(state);
+  const visit = (id: string): CompleteTodoNodeView => {
+    const node = requireNode(state, id);
+    return {
+      id: todoNodeRef(state, node.id),
+      todo: node.content,
+      status: node.status,
+      focused: node.id === state.focusId,
+      children: node.children.map(visit),
+    };
+  };
+  return {
+    revision: state.revision,
+    focusId: state.focusId === null ? null : todoNodeRef(state, state.focusId),
+    roots: state.roots.map(visit),
   };
 }
 

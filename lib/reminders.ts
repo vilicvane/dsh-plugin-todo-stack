@@ -1,6 +1,8 @@
 import { deriveEventMessage } from '@deepseek-ai/dsh-session';
+import type { TodoStackState } from './types.ts';
 
 export const TODO_STACK_REMINDER_CONTEXT_NAME = 'todo-stack:reminder';
+export const TODO_STACK_NO_FOCUS_CONTEXT_NAME = 'todo-stack:no-focus';
 
 const SYSTEM_PROMPT_PLUGIN = '@deepseek-ai/dsh-system-prompt';
 
@@ -37,6 +39,31 @@ function effectiveOpenTurnEvents(session: any, turn: number): any[] {
     if (deriveEventMessage(event) !== null) events.push(event);
   }
   return events;
+}
+
+export function latestEligibleSurfaceSeq(session: any): number | undefined {
+  for (let index = session.surface.nodes.length - 1; index >= 0; index -= 1) {
+    const seq = session.surface.nodes[index];
+    const event = session.events[seq];
+    if (event?.surfaceOp !== 'append' || isRuntimeContextSnapshot(event)) continue;
+    if (deriveEventMessage(event) !== null) return seq;
+  }
+  return undefined;
+}
+
+export function buildNoFocusGuardContext(options: {
+  session: any;
+  state: TodoStackState;
+  opening: boolean;
+}): string {
+  if (options.opening || options.state.focusId !== null) return '';
+  const afterSeq = latestEligibleSurfaceSeq(options.session);
+  if (afterSeq === undefined) return '';
+  return [
+    `<todo-stack-no-focus after-node="${afterSeq}">`,
+    'I currently have no todo focus. Before I continue working, I need to restore one: choose a meaningful pending leaf, or create a new focused todo if more work remains. If I am only wrapping up and summarizing completed work, I can continue without one.',
+    '</todo-stack-no-focus>',
+  ].join('\n');
 }
 
 export function countOpenTurnNodes(session: any, turn: number): number {
@@ -95,10 +122,12 @@ export function buildTodoStackReminderContext(options: {
   ];
   const lines = [`<todo-stack-reminder ${attributes.join(' ')}>`];
   lines.push(
-    `This turn has crossed ${announceMilestone} nodes. If you think updating the current todo branch would make your work and progress clearer to the user, update it now; otherwise continue.`,
+    `This turn has crossed ${announceMilestone} nodes. I need to reflect now on whether I am still synchronized with the todo stack:`,
   );
   lines.push(
-    'Keep each todo node to one short outcome; keep working details out of the tree.',
+    '- Am I diving deeper? I should break down the current focus and move focus to the next concrete step.',
+    '- Did I remember something to handle later? I should add it below the relevant task without losing my current focus.',
+    '- In any case, I need to keep the stack up to date. Otherwise I could lose focus during turn and session compaction, and the user would lose visibility into the structure of my plan.',
     '</todo-stack-reminder>',
   );
   return lines.join('\n');

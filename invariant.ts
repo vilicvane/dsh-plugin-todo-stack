@@ -14,6 +14,42 @@ const inject = ['invariants'];
 type Fail = (message: string) => never;
 type EventLike = { type: string; data: unknown };
 
+function compatibilityRowsForLegacyFocus(
+  state: TodoStackState,
+  rawFocusId: unknown,
+): ReturnType<typeof todoDockItems> | undefined {
+  if (typeof rawFocusId !== 'string') return undefined;
+  const focused = state.nodes[rawFocusId];
+  if (focused?.status !== 'pending') return undefined;
+  const ids: string[] = [];
+  const visit = (id: string): void => {
+    ids.push(id);
+    for (const childId of state.nodes[id].children) visit(childId);
+  };
+  for (const rootId of state.roots) visit(rootId);
+  const index = ids.indexOf(rawFocusId);
+  if (index < 0) return undefined;
+
+  const rows = todoDockItems({ ...state, focusId: null });
+  const row = rows[index];
+  const match = /^((?:· )*)(.*)$/.exec(row.content);
+  if (match === null) return undefined;
+  rows[index] = {
+    content: `${match[1]}▶ ${match[2]}`,
+    status: 'in_progress',
+  };
+  return rows;
+}
+
+function withoutLegacyFocusMarker(
+  rows: ReturnType<typeof todoDockItems>,
+): ReturnType<typeof todoDockItems> {
+  return rows.map((row) => ({
+    ...row,
+    content: row.content.replace(/^((?:· )*)▶ /, '$1'),
+  }));
+}
+
 function validateCarrier(event: EventLike, previous: TodoStackState, fail: Fail): TodoStackState {
   let envelope;
   try {
@@ -28,16 +64,20 @@ function validateCarrier(event: EventLike, previous: TodoStackState, fail: Fail)
   const rawTodos = (event.data as { todos?: unknown }).todos;
   const expectedTodos = todoDockItems(envelope.state);
   const rawState = (event.data as any)?.todoStack?.state;
-  const repairedLegacyFocus = rawState?.focusId === null
-    && Object.values(rawState?.nodes ?? {}).some((node: any) => node?.status === 'pending');
-  const legacyExpectedTodos = expectedTodos.map((todo) => todo.status !== 'in_progress'
-    ? todo
-    : {
-        content: todo.content.replace(/^((?:· )*)▶ /, '$1'),
-        status: 'pending' as const,
-      });
-  if (JSON.stringify(rawTodos) !== JSON.stringify(expectedTodos)
-    && (!repairedLegacyFocus || JSON.stringify(rawTodos) !== JSON.stringify(legacyExpectedTodos))) {
+  const legacyTodos = rawState?.focusId === envelope.state.focusId
+    ? undefined
+    : compatibilityRowsForLegacyFocus(envelope.state, rawState?.focusId);
+  const rawOperation = (event.data as any)?.todoStack?.operation;
+  const legacyShape = rawOperation === 'rename'
+    || Object.values(rawState?.nodes ?? {}).some((node: any) => node?.title !== undefined);
+  const acceptedTodos = [expectedTodos];
+  if (legacyTodos !== undefined) acceptedTodos.push(legacyTodos);
+  if (legacyShape) {
+    acceptedTodos.push(withoutLegacyFocusMarker(expectedTodos));
+    if (legacyTodos !== undefined) acceptedTodos.push(withoutLegacyFocusMarker(legacyTodos));
+  }
+  if (!acceptedTodos.some((candidate) =>
+    JSON.stringify(rawTodos) === JSON.stringify(candidate))) {
     fail('todo/write compatibility list does not match its todoStack snapshot');
   }
   return envelope.state;

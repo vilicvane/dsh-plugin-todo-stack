@@ -14,7 +14,8 @@
     "lib/*.ts",
     "scripts/build-client.mjs",
     "README.md",
-    "design.md"
+    "design.md",
+    "tool-redesign.md"
   ],
   "exports": {
     ".": "./index.ts",

@@ -16,11 +16,25 @@ const name = 'todo-stack-prompt-eval-runner';
 const inject = ['agentDefaultModel', 'agents', 'sessions'];
 
 const PROBE_TOOL = 'inspect_release_area';
+const TODO_TOOLS = [
+  'todo_stack__show',
+  'todo_stack__create',
+  'todo_stack__expand',
+  'todo_stack__focus',
+  'todo_stack__push',
+  'todo_stack__complete',
+  'todo_stack__delete',
+  'todo_stack__edit',
+] as const;
+const MUTATION_TOOLS: ReadonlySet<string> = new Set(
+  TODO_TOOLS.filter((tool) => tool !== 'todo_stack__show'),
+);
 const SCENARIOS = [
   'tracked_release',
   'trivial_direct',
   'blocked_release',
   'existing_focus',
+  'recover_focus',
 ] as const;
 type Scenario = typeof SCENARIOS[number];
 
@@ -52,8 +66,9 @@ interface ScenarioRuntime {
 const scenarioPrompt: Record<Scenario, string> = {
   tracked_release: `Assess whether release cobalt is ready. Inspect the api and storage areas separately with ${PROBE_TOOL}, then use its verify area to validate the combined decision. Report a concise conclusion containing every returned COBALT evidence code. Carry out the checks yourself rather than asking me to do them.`,
   trivial_direct: 'Reply with exactly COBALT-PONG and nothing else. This is a direct answer: do not use any tool.',
-  blocked_release: `Assess whether blocked release cobalt can proceed by calling ${PROBE_TOOL} once with area blocked. If it reports missing external input, stop work without retrying or inventing the input, preserve the task as pending, and ask me for what is needed. Include the returned COBALT evidence code.`,
-  existing_focus: `Within the currently focused release task, assess cobalt readiness as one distinct subtask. Inspect api and storage separately with ${PROBE_TOOL}, then use its verify area. Complete only the readiness subtask, leave the broader release task pending, and report every returned COBALT evidence code.`,
+  blocked_release: `Assess whether blocked release cobalt can proceed by calling ${PROBE_TOOL} once with area blocked. If it reports missing external input, stop without retrying or inventing the input, retain a meaningful record of the blocked work, and ask me for what is needed. Include the returned COBALT evidence code.`,
+  existing_focus: `Within the currently focused release task, assess cobalt readiness as one distinct piece of work. Inspect api and storage separately with ${PROBE_TOOL}, then use its verify area. Finish only the readiness work, leave the broader release task pending, and report every returned COBALT evidence code.`,
+  recover_focus: `Resume the pending API compatibility check, inspect api exactly once with ${PROBE_TOOL}, then report the returned COBALT evidence code. Leave the unrelated release-notes work for later.`,
 };
 
 function textOf(value: unknown): string {
@@ -78,11 +93,7 @@ function textOf(value: unknown): string {
 
 function parseToolArguments(value: unknown): any {
   if (typeof value !== 'string') return value;
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return value;
-  }
+  try { return JSON.parse(value) as unknown; } catch { return value; }
 }
 
 function toolCalls(session: any): Array<{ seq: number; name: string; arguments: any }> {
@@ -112,20 +123,29 @@ function requestFingerprint(session: any): string | null {
     && Array.isArray(event.data?.header?.tools)
     && event.data.header.tools.some((tool: any) => tool?.name === PROBE_TOOL));
   if (request === undefined) return null;
-  const payload = JSON.stringify({
+  return createHash('sha256').update(JSON.stringify({
     system: request.data.header.system,
     tools: request.data.header.tools,
-  });
-  return createHash('sha256').update(payload).digest('hex');
+  })).digest('hex');
 }
 
 function check(pass: boolean, detail: string): CheckResult {
   return { pass, detail };
 }
 
+function mutationCalls(calls: ReturnType<typeof toolCalls>) {
+  return calls.filter((call) => MUTATION_TOOLS.has(call.name));
+}
+
 function commonEvidence(finalText: string): { found: string[]; expected: readonly string[] } {
   const expected = ['COBALT-API-2', 'COBALT-STORAGE-3', 'COBALT-READY'] as const;
   return { found: expected.filter((item) => finalText.includes(item)), expected };
+}
+
+function focusedLeaf(state: ReturnType<typeof foldTodoStack>): boolean {
+  if (state.focusId === null) return false;
+  const node = state.nodes[state.focusId];
+  return node?.status === 'pending' && node.children.length === 0;
 }
 
 function evaluateTracked(
@@ -135,20 +155,23 @@ function evaluateTracked(
   finalText: string,
   inspected: readonly string[],
 ): Record<string, CheckResult> {
+  const mutations = mutationCalls(calls);
   const probeCalls = calls.filter((call) => call.name === PROBE_TOOL);
   const firstProbeSeq = probeCalls.at(0)?.seq ?? Number.POSITIVE_INFINITY;
-  const firstTodoSeq = calls.find((call) => call.name === 'update_todo_stack')?.seq ?? Number.POSITIVE_INFINITY;
+  const firstMutation = mutations.at(0);
   const verifyIndex = calls.findIndex((call) => call.name === PROBE_TOOL && call.arguments?.area === 'verify');
-  const completeIndex = calls.findLastIndex((call) => call.name === 'update_todo_stack' && call.arguments?.action === 'complete');
+  const completeIndex = calls.findLastIndex((call) => call.name === 'todo_stack__complete');
   const nodes = Object.values(state.nodes);
   const shortAnchors = nodes.every((node) => node.content.trim() === node.content
     && !node.content.includes('\n')
-    && node.content.length <= 100);
+    && node.content.length <= 100
+    && !/COBALT-|evidence code|report (?:a |the )?(?:concise )?conclusion/i.test(node.content));
   const evidence = commonEvidence(finalText);
   return {
-    root_before_work: check(
-      firstTodoSeq < firstProbeSeq && operations.at(0)?.action === 'push',
-      `first todo seq=${firstTodoSeq}, first work seq=${firstProbeSeq}, first operation=${operations.at(0)?.action ?? 'missing'}`,
+    create_before_work: check(
+      firstMutation?.name === 'todo_stack__create' && (firstMutation.seq ?? Infinity) < firstProbeSeq
+        && operations.at(0)?.action === 'create',
+      `first mutation=${JSON.stringify(firstMutation)}, first probe seq=${firstProbeSeq}, operations=${JSON.stringify(operations)}`,
     ),
     work_sequence: check(
       inspected.length === 3
@@ -161,12 +184,15 @@ function evaluateTracked(
       verifyIndex >= 0 && completeIndex > verifyIndex,
       `verify call index=${verifyIndex}, final complete call index=${completeIndex}`,
     ),
-    bounded_short_tree: check(
-      state.roots.length === 1 && nodes.length >= 1 && nodes.length <= 6 && shortAnchors,
+    structured_short_tree: check(
+      state.roots.length >= 1 && state.roots.length <= 2
+        && nodes.length >= 2 && nodes.length <= 10
+        && nodes.some((node) => node.children.length > 0)
+        && shortAnchors,
       `roots=${state.roots.length}, nodes=${nodes.length}, anchors=${JSON.stringify(nodes.map((node) => node.content))}`,
     ),
     no_unfinished_work: check(
-      state.focusId === null && nodes.length > 0 && nodes.every((node) => node.status === 'completed'),
+      state.focusId === null && nodes.length > 0 && nodes.every((node) => node.status !== 'pending'),
       `focus=${state.focusId ?? 'null'}, statuses=${JSON.stringify(nodes.map((node) => node.status))}`,
     ),
     final_evidence: check(
@@ -198,32 +224,35 @@ function evaluateBlocked(
   finalText: string,
   inspected: readonly string[],
 ): Record<string, CheckResult> {
+  const mutations = mutationCalls(calls);
   const firstProbeSeq = calls.find((call) => call.name === PROBE_TOOL)?.seq ?? Number.POSITIVE_INFINITY;
-  const firstTodoSeq = calls.find((call) => call.name === 'update_todo_stack')?.seq ?? Number.POSITIVE_INFINITY;
-  const actions = calls
-    .filter((call) => call.name === 'update_todo_stack')
-    .map((call) => String(call.arguments?.action));
   const nodes = Object.values(state.nodes);
+  const focused = state.focusId === null ? undefined : state.nodes[state.focusId];
+  const conciseAnchors = nodes.every((node) => node.content.length <= 100
+    && !/COBALT-|evidence|capture (?:its |the )?status|request(?:ing)? input/i.test(node.content));
   return {
-    root_before_work: check(
-      firstTodoSeq < firstProbeSeq && actions.at(0) === 'push',
-      `first todo seq=${firstTodoSeq}, first work seq=${firstProbeSeq}, actions=${JSON.stringify(actions)}`,
+    create_before_work: check(
+      mutations.at(0)?.name === 'todo_stack__create'
+        && (mutations.at(0)?.seq ?? Infinity) < firstProbeSeq,
+      `first mutation=${JSON.stringify(mutations.at(0))}, first probe seq=${firstProbeSeq}`,
     ),
     one_blocked_probe: check(
       inspected.length === 1 && inspected[0] === 'blocked',
       `observed=${JSON.stringify(inspected)}`,
     ),
-    retain_focus_after_blocker: check(
-      Number.isFinite(firstProbeSeq)
-        && !actions.some((action) => action === 'exit' || action === 'complete' || action === 'drop'),
-      `probe seq=${firstProbeSeq}, actions=${JSON.stringify(actions)}`,
+    retain_blocked_work: check(
+      !mutations.some((call) => call.name === 'todo_stack__delete')
+        && nodes.some((node) => node.status === 'pending'),
+      `mutations=${JSON.stringify(mutations)}, statuses=${JSON.stringify(nodes.map((node) => node.status))}`,
     ),
-    pending_focused_task: check(
-      state.roots.length === 1
-        && nodes.length === 1
-        && nodes[0]?.status === 'pending'
-        && state.focusId === nodes[0]?.id,
-      `roots=${state.roots.length}, focus=${state.focusId ?? 'null'}, nodes=${JSON.stringify(nodes)}`,
+    meaningful_leaf_focus: check(
+      focusedLeaf(state)
+        && focused !== undefined
+        && conciseAnchors
+        && focused.content.length <= 100
+        && !/COBALT-|evidence/i.test(focused.content)
+        && /release token/i.test(focused.content),
+      `focus=${state.focusId ?? 'null'}, focused=${JSON.stringify(focused ?? null)}`,
     ),
     blocker_reported: check(
       finalText.includes('COBALT-NEEDS-TOKEN') && /release token/i.test(finalText),
@@ -240,19 +269,25 @@ function evaluateExistingFocus(
   inspected: readonly string[],
   seededOperationCount: number,
 ): Record<string, CheckResult> {
+  const mutations = mutationCalls(calls);
   const modelOperations = operations.slice(seededOperationCount);
   const firstProbeSeq = calls.find((call) => call.name === PROBE_TOOL)?.seq ?? Number.POSITIVE_INFINITY;
-  const firstTodoCall = calls.find((call) => call.name === 'update_todo_stack');
+  const firstMutation = mutations.at(0);
+  const firstMutationAlignsFocus = firstMutation?.name === 'todo_stack__expand'
+    ? firstMutation.arguments?.id === 't1'
+    : firstMutation?.name === 'todo_stack__push'
+      && firstMutation.arguments?.id === 't1'
+      && firstMutation.arguments?.focus === true;
   const root = state.nodes.t1;
   const descendants = Object.values(state.nodes).filter((node) => node.id !== 't1');
   const evidence = commonEvidence(finalText);
   return {
-    child_before_work: check(
-      (firstTodoCall?.seq ?? Number.POSITIVE_INFINITY) < firstProbeSeq
-        && firstTodoCall?.arguments?.action === 'push'
-        && firstTodoCall?.arguments?.expected_revision === 1
-        && modelOperations.at(0)?.action === 'push',
-      `first todo=${JSON.stringify(firstTodoCall)}, first work seq=${firstProbeSeq}, model operations=${JSON.stringify(modelOperations)}`,
+    align_focus_before_work: check(
+      firstMutation !== undefined
+        && firstMutationAlignsFocus
+        && (firstMutation.seq ?? Infinity) < firstProbeSeq
+        && modelOperations.at(0)?.action === (firstMutation?.name === 'todo_stack__expand' ? 'expand' : 'push'),
+      `first mutation=${JSON.stringify(firstMutation)}, first probe seq=${firstProbeSeq}, operations=${JSON.stringify(modelOperations)}`,
     ),
     work_sequence: check(
       inspected.length === 3
@@ -264,19 +299,57 @@ function evaluateExistingFocus(
     preserve_ancestor: check(
       state.roots.length === 1
         && root?.content === 'Deliver cobalt release'
-        && root.status === 'pending'
-        && state.focusId === 't1',
+        && root.status === 'pending',
       `root=${JSON.stringify(root)}, focus=${state.focusId ?? 'null'}`,
     ),
-    complete_only_subtask: check(
-      descendants.length >= 1 && descendants.length <= 5
-        && descendants.every((node) => node.status === 'completed'),
-      `descendants=${JSON.stringify(descendants)}`,
+    preserve_deferred_structure: check(
+      descendants.length >= 1 && descendants.length <= 8
+        && descendants.some((node) => node.status === 'completed')
+        && descendants.every((node) => node.status !== 'dropped')
+        && state.focusId === null,
+      `descendants=${JSON.stringify(descendants)}, focus=${state.focusId ?? 'null'}`,
     ),
     final_evidence: check(
       evidence.found.length === evidence.expected.length,
       `found=${JSON.stringify(evidence.found)}, expected=${JSON.stringify(evidence.expected)}`,
     ),
+  };
+}
+
+function evaluateRecoverFocus(
+  calls: ReturnType<typeof toolCalls>,
+  operations: ReturnType<typeof todoOperations>,
+  state: ReturnType<typeof foldTodoStack>,
+  finalText: string,
+  inspected: readonly string[],
+  seededOperationCount: number,
+): Record<string, CheckResult> {
+  const mutations = mutationCalls(calls);
+  const modelOperations = operations.slice(seededOperationCount);
+  const firstProbeSeq = calls.find((call) => call.name === PROBE_TOOL)?.seq ?? Number.POSITIVE_INFINITY;
+  const focusCall = mutations.find((call) => call.name === 'todo_stack__focus');
+  const completeCall = mutations.find((call) => call.name === 'todo_stack__complete');
+  const conciseAnchors = Object.values(state.nodes).every((node) => node.content.length <= 100
+    && !/COBALT-|evidence|report (?:its|the|an|a)?/i.test(node.content));
+  return {
+    focus_before_work: check(
+      focusCall?.arguments?.id === 't1' && (focusCall.seq ?? Infinity) < firstProbeSeq
+        && modelOperations.at(0)?.action === 'focus',
+      `focus call=${JSON.stringify(focusCall)}, first probe seq=${firstProbeSeq}, operations=${JSON.stringify(modelOperations)}`,
+    ),
+    one_api_probe: check(
+      inspected.length === 1 && inspected[0] === 'api',
+      `observed=${JSON.stringify(inspected)}`,
+    ),
+    complete_selected_only: check(
+      completeCall !== undefined
+        && state.nodes.t1?.status === 'completed'
+        && state.nodes.t2?.status === 'pending'
+        && state.focusId === null
+        && conciseAnchors,
+      `complete=${JSON.stringify(completeCall)}, state=${JSON.stringify(state)}`,
+    ),
+    final_evidence: check(finalText.includes('COBALT-API-2'), `final=${JSON.stringify(finalText)}`),
   };
 }
 
@@ -298,15 +371,10 @@ function evaluate(
     checks = evaluateTrivial(calls, operations, state, finalText);
   } else if (scenario === 'blocked_release') {
     checks = evaluateBlocked(calls, state, finalText, runtime.inspected);
+  } else if (scenario === 'existing_focus') {
+    checks = evaluateExistingFocus(calls, operations, state, finalText, runtime.inspected, runtime.seededOperationCount);
   } else {
-    checks = evaluateExistingFocus(
-      calls,
-      operations,
-      state,
-      finalText,
-      runtime.inspected,
-      runtime.seededOperationCount,
-    );
+    checks = evaluateRecoverFocus(calls, operations, state, finalText, runtime.inspected, runtime.seededOperationCount);
   }
   return {
     scenario,
@@ -333,18 +401,33 @@ function wilson95(successes: number, total: number): { low: number; high: number
   return { low: center - spread, high: center + spread };
 }
 
+function seedScenario(session: any, scenario: Scenario, runtime: ScenarioRuntime): void {
+  if (scenario === 'existing_focus') {
+    const state = mutateTodoStack(emptyTodoStack(), {
+      action: 'create',
+      todos: ['Deliver cobalt release'],
+    }, { maxNodes: 200 }).state;
+    session.append('todo/write', makeTodoStackCarrier('create', state));
+    runtime.seededOperationCount = 1;
+  } else if (scenario === 'recover_focus') {
+    const created = mutateTodoStack(emptyTodoStack(), {
+      action: 'create',
+      todos: ['Check API compatibility', 'Prepare release notes'],
+    }, { maxNodes: 200 }).state;
+    const state = { ...created, focusId: null };
+    session.append('todo/write', makeTodoStackCarrier('create', state));
+    runtime.seededOperationCount = 1;
+  }
+}
+
 async function runOne(ctx: any, selection: any, scenario: Scenario, repetition: number): Promise<RunResult> {
   const agents = ctx.get('agents');
   const sessions = ctx.get('sessions');
   const runtime: ScenarioRuntime = { inspected: [], seededOperationCount: 0 };
   const setup = (agentCtx: any): void => {
-    installModelSelection(agentCtx, {
-      current: { ...selection },
-      assembled: undefined,
-    });
+    installModelSelection(agentCtx, { current: { ...selection }, assembled: undefined });
     agentCtx.tools.presentAs('native');
-    // Restrictions validate inherited/global names before agent-local tools are merged.
-    agentCtx.tools.restrict({ allow: ['get_todo_stack', 'update_todo_stack'] });
+    agentCtx.tools.restrict({ allow: [...TODO_TOOLS] });
     agentCtx.tools.register(defineTool({
       name: PROBE_TOOL,
       description: 'Inspect one release area. Inspect api and storage before verify. A blocked result requires external user input and must not be retried or treated as completed. Include returned evidence codes in the final answer.',
@@ -378,15 +461,7 @@ async function runOne(ctx: any, selection: any, scenario: Scenario, repetition: 
       setup,
     });
     await handle.agent.whenIdle();
-    if (scenario === 'existing_focus') {
-      const seeded = mutateTodoStack(
-        emptyTodoStack(),
-        { action: 'push', content: 'Deliver cobalt release' },
-        { maxNodes: 200 },
-      ).state;
-      handle.agent.session.append('todo/write', makeTodoStackCarrier('push', seeded));
-      runtime.seededOperationCount = 1;
-    }
+    seedScenario(handle.agent.session, scenario, runtime);
     handle.agent.followup({
       id: randomUUID(),
       role: 'user',
@@ -438,9 +513,7 @@ async function run(ctx: any): Promise<void> {
     throw new Error('TODO_STACK_PROMPT_EVAL_RUNS must be an integer from 1 to 20');
   }
   const requestedScenarios = (process.env.TODO_STACK_PROMPT_EVAL_SCENARIOS ?? SCENARIOS.join(','))
-    .split(',')
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0);
+    .split(',').map((value) => value.trim()).filter((value) => value.length > 0);
   if (requestedScenarios.length === 0
     || requestedScenarios.some((value) => !(SCENARIOS as readonly string[]).includes(value))) {
     throw new Error(`TODO_STACK_PROMPT_EVAL_SCENARIOS must contain only: ${SCENARIOS.join(', ')}`);
@@ -486,8 +559,7 @@ async function run(ctx: any): Promise<void> {
     requestFingerprints: string[];
   }>;
   const successes = results.filter((result) => result.passed).length;
-  const stableFingerprints = Object.values(scenarioSummaries)
-    .every((summary) => summary.stableFingerprint);
+  const stableFingerprints = Object.values(scenarioSummaries).every((summary) => summary.stableFingerprint);
   const interval = wilson95(successes, results.length);
   const artifactDir = resolve(process.env.TODO_STACK_PROMPT_EVAL_ARTIFACT_DIR ?? '.tmp');
   const artifactPath = resolve(artifactDir, `prompt-eval-matrix-${Date.now()}.json`);

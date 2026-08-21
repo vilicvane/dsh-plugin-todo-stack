@@ -1,61 +1,88 @@
 # dsh-plugin-todo-stack
 
-A persistent tree-shaped todo stack for DeepSeek Harness agents. The plugin
-keeps one task tree per session and exposes a single focus path through it.
+A persistent tree-shaped focus anchor for DeepSeek Harness agents. The tree
+keeps the structure of substantive work available across turn and session
+compaction, while its focused leaf shows both the agent and the user what is
+being worked on now.
+
+Todo nodes are deliberately brief. Each node stores one task outcome, not a
+plan, progress log, evidence store, notes field, or handoff narrative. Detailed
+working context stays in the conversation or workspace.
 
 ## Tools
 
-- `get_todo_stack` reads all roots or a depth-limited subtree and returns the
-  current revision and focus path.
-- `update_todo_stack` applies one revision-guarded action: `push`, `add`,
-  `focus`, `exit`, `complete`, `edit`, `move`, `drop`, or `reopen`.
+- `todo_stack__show()` returns the complete tree, terminal history, current
+  focus, ids, and revision.
+- `todo_stack__create(todo_to_focus, rest_todos?)` creates a root group and
+  focuses its first item. Optional remaining roots are independent top-level
+  outcomes, not steps of the first goal.
+- `todo_stack__expand(id, sub_todo_to_focus, rest_todos?)` decomposes the
+  current focused leaf into ordered children and focuses the first child.
+- `todo_stack__focus(id)` selects an existing pending leaf.
+- `todo_stack__push(id, todo, focus=false)` records one child below an explicit
+  parent, optionally entering it immediately.
+- `todo_stack__complete(id)` marks a verified outcome complete.
+- `todo_stack__delete(id)` permanently deletes a node and its whole subtree.
+- `todo_stack__edit(id, todo)` replaces only a node's short task outcome.
 
-Each node carries one short core-task anchor in `content`, preferably a concise
-outcome phrase. It is not a plan, progress log, evidence store, notes field, or
-handoff narrative. There is no separate title, description, details, or notes
-layer. `edit` replaces that anchor and does not change the node id, focus,
-lifecycle, parent, or sibling order.
+Focus may point only to a pending leaf. Completing or deleting the focused node
+clears focus instead of guessing what the agent should do next. If substantive
+work continues, the agent must deliberately focus another pending leaf or
+create new focused work. A short no-focus reminder repeats after model-visible
+nodes until that happens; it allows no focus only while wrapping up completed
+work.
 
-`push` descends into newly created work. `exit` returns without claiming the
-work is done, but only from a child to its pending parent. `complete` finishes
-the current focus only when no pending work remains below it. As long as any
-pending node exists, exactly one pending node remains focused; blockers and
-waiting for user input do not clear that focus.
+`push` is for recording deferred work under an existing task. An unfocused
+push below the focused leaf would turn that leaf into a branch, so it is
+rejected with an instruction to use `todo_stack__expand`. `complete` rejects a
+node whose subtree still contains pending work.
 
-The model guidance is intentionally short: during the opening turn, create and
-focus a root for work that needs multiple steps or tool calls, using revision
-`0` when no todo context exists. The opening reminder is a transient system
-section rather than a durable transcript snapshot. Keep nodes to one outcome,
-and add a focused direct child
-for the next distinct multi-action piece unless the current task is nearly done
-or has no useful child. A useful hierarchy of short tasks helps the user see
-what the agent is doing and how the work is progressing. Completion is recorded
-after verification; detailed working context stays in the conversation and
-workspace.
+New nodes receive compact session-local ids (`t1`, `t2`, ...). Restored legacy
+ids remain canonical, but views expose a shortest unique prefix that every
+id-taking tool accepts.
 
-New nodes receive compact stable ids (`t1`, `t2`, ...). Existing sessions keep
-their canonical legacy ids, but model-facing views expose a unique short
-prefix that the tools accept directly.
+## Prompt behavior
+
+The prompt is written as the agent's own first-person working commitment. At
+the beginning of substantive work it creates a concise tree, keeps one
+meaningful leaf focused, deepens the current branch when work becomes more
+concrete, and records later work without losing that focus. The hierarchy may
+be deep even though each node is brief.
+
+One goal with several checks starts as one root and then expands into children;
+the checks are not flattened into extra roots. Nodes name outcomes rather than
+tool arguments, acceptance criteria, evidence, or final-response requirements.
+After `create`, the tool result carries one short first-person check that asks
+for another expansion only when the new root still contains two or more
+independent outcomes.
+
+Immediate answers that require no substantive work do not need a stack. At 30,
+60, 90, ... model-visible nodes in one open turn, a transient first-person
+reflection asks whether the current work and tree have drifted. Runtime prompt
+snapshots are excluded from this count.
 
 ## DSH integration
 
 The plugin registers:
 
-- the two model tools;
+- the eight model tools above;
 - a persistent `todoStack` session projection;
-- a Web `TodoStackDock` that renders the hierarchy, current focus, and node
-  lifecycle without encoding UI markers into task titles;
-- a flattened persistent `todos` projection retained as a compatibility
-  fallback for clients without the custom dock;
-- turn-start model context containing only the active branch and its current
-  working level, cleared after the turn's first todo mutation;
-- the live updated branch plus one short focus/direct-child instruction in
-  each todo mutation result;
-- one-request dynamic branch reminders at each 30-node open-turn milestone.
+- a Web `TodoStackDock` that renders hierarchy, focus, and lifecycle;
+- a flattened `todos` compatibility projection for clients without the custom
+  dock;
+- turn-start context containing only the focused branch and its working level;
+- the live updated branch in every mutation result, plus the bounded
+  post-`create` focus-granularity check; and
+- dynamic node-milestone and no-focus reminders.
 
-It does not depend on or load `@deepseek-ai/dsh-tool-todo`. Keep the stock
-`tool-todo` loader entry disabled so it does not register a competing `todos`
-projection or expose conflicting model instructions.
+The turn-start branch stays frozen until the first Todo Stack mutation in that
+turn. Mutation results carry the live branch, avoiding a new system context
+snapshot after every Todo Stack call. `todo_stack__show` loads the full tree
+only when the agent needs it.
+
+The plugin does not depend on or load `@deepseek-ai/dsh-tool-todo`. Keep the
+stock `tool-todo` loader entry disabled so it cannot register a competing
+`todos` projection or conflicting instructions.
 
 ## Install for local development
 
@@ -74,7 +101,6 @@ Add the plugin to the profile patch:
       name: dsh-plugin-todo-stack
       config:
         maxNodes: 200
-        maxReadNodes: 80
         contextChildren: 8
         todoDock: true
         reminderIntervalNodes: 30
@@ -82,9 +108,9 @@ Add the plugin to the profile patch:
 
 Restart the DSH profile after installation or patch changes.
 
-The browser entry is prebuilt as `client.js`, so installing directly from the
-Git repository does not require a client build toolchain. When changing
-`client/index.ts` locally, regenerate it with:
+The browser entry is committed as `client.js`, so a GitHub installation does
+not require a client build toolchain. After changing `client/index.ts`, rebuild
+it with:
 
 ```sh
 pnpm build:client
@@ -92,43 +118,44 @@ pnpm build:client
 
 `pnpm check` verifies that the committed browser bundle is current.
 
-## End-to-end test
+## End-to-end tests
 
-The repeatable E2E workflow uses an isolated `test-todo-stack` profile and a
-real model/tool loop. It checks mutations across multiple turns, runtime
-context refreshes, both projections, and two cold session resumes:
+The deterministic E2E uses an isolated `test-todo-stack` profile and a real
+model/tool loop. It checks the tool family, projections, no-focus guard, and two
+cold session resumes:
 
 ```sh
 pnpm e2e
 ```
 
-The script writes a compact diagnostic artifact under `.tmp/` and prints its
-path together with the persisted session id.
-
-To evaluate the production prompt rather than a forced tool sequence, run:
+The production-prompt evaluation uses independent real sessions:
 
 ```sh
 TODO_STACK_PROMPT_EVAL_RUNS=3 pnpm e2e:prompt
 ```
 
-Each repetition creates four independent production-prompt sessions: a tracked
-multi-tool release check, a direct answer that must not create todo state, a
-blocked task that must remain pending and focused, and a subtask below an
-existing focused root. The runner checks tool order, durable tree state, final
-evidence, and a
-per-scenario request fingerprint, then reports pass rates with Wilson 95%
-confidence intervals under `.tmp/`. Use
-`TODO_STACK_PROMPT_EVAL_SCENARIOS=blocked_release` to isolate one scenario.
+Its five scenarios cover tracked multi-tool work, a trivial direct answer, a
+blocked focused task, expansion below an existing focus, and recovery from a
+pending tree with no focus. It grades durable tool order and tree state rather
+than exact wording or a fixed tree shape, fingerprints the effective prompt and
+tools, and writes JSON artifacts under `.tmp/`. Isolate a scenario with, for
+example:
+
+```sh
+TODO_STACK_PROMPT_EVAL_RUNS=3 \
+TODO_STACK_PROMPT_EVAL_SCENARIOS=recover_focus \
+pnpm e2e:prompt
+```
 
 ## Configuration
 
 | Setting | Default | Meaning |
 | --- | ---: | --- |
 | `maxNodes` | `200` | Maximum retained nodes in one session tree. |
-| `maxReadNodes` | `80` | Maximum nodes returned by one read. |
-| `contextChildren` | `8` | Immediate children included in runtime context. |
+| `contextChildren` | `8` | Immediate siblings or children included at the working frontier. |
 | `todoDock` | `true` | Publish the flattened `todos` compatibility projection. The custom Web dock reads `todoStack` directly. |
-| `reminderIntervalNodes` | `30` | Open-turn surface-node interval for optional current-branch maintenance reminders. |
+| `reminderIntervalNodes` | `30` | Open-turn model-visible node interval for tree synchronization reminders. |
 
-See [design.md](./design.md) for state semantics and the rc.7 persistence
-carrier rationale.
+See [design.md](./design.md) for state, persistence, and prompt semantics and
+[tool-redesign.md](./tool-redesign.md) for the decisions behind this tool
+family.

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { renderTodoStackContext } from '../lib/view.ts';
+import { buildCompleteTodoTree, renderTodoStackContext } from '../lib/view.ts';
 import type { TodoStackNode, TodoStackState } from '../lib/types.ts';
 
 function node(
@@ -44,35 +44,31 @@ test('runtime snapshot shows only the focus branch and leaf-level siblings', () 
   ].join('\n'));
 });
 
-test('a non-leaf focus exposes its children without marking the branch current', () => {
+test('a non-leaf focus is rejected by the view invariant', () => {
   const state = fixture();
   state.focusId = 't3';
-  state.nodes.t5.status = 'completed';
-
-  const context = renderTodoStackContext(state, 8);
-  assert.match(context, /  - \[ \] t3 调研 A2 特性/);
-  assert.match(context, /    - \[ \] t6 整理结论/);
-  assert.doesNotMatch(context, /进行中/);
-  assert.doesNotMatch(context, /t2 调研 A1/);
-  assert.doesNotMatch(context, /t7 技术验证/);
+  assert.throws(() => renderTodoStackContext(state, 8), /leaf node/);
 });
 
-test('moving focus up reveals the completed branch peers', () => {
+test('a temporary no-focus state exposes pending roots', () => {
   const state = fixture();
   state.revision = 15;
-  state.focusId = 't1';
-  state.nodes.t3.status = 'completed';
-  state.nodes.t5.status = 'completed';
-  state.nodes.t6.status = 'completed';
+  state.focusId = null;
 
   assert.equal(renderTodoStackContext(state, 8), [
     '<todo-stack revision="15">',
     '- [ ] t1 开发 A 功能',
-    '  - [x] t2 调研 A1 特性',
-    '  - [x] t3 调研 A2 特性',
-    '  - [ ] t7 技术验证',
     '</todo-stack>',
   ].join('\n'));
+});
+
+test('complete tree view returns all nested branches without truncation', () => {
+  const tree = buildCompleteTodoTree(fixture());
+  assert.equal(tree.revision, 12);
+  assert.equal(tree.focusId, 't5');
+  assert.equal(tree.roots[0]?.children.length, 3);
+  assert.equal(tree.roots[0]?.children[0]?.status, 'completed');
+  assert.equal(tree.roots[0]?.children[1]?.children[1]?.focused, true);
 });
 
 test('a crowded frontier keeps the current leaf inside the bounded window', () => {

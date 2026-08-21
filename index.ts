@@ -9,12 +9,11 @@ import {
   todoStackProjection,
 } from './lib/projection.ts';
 import { foldTodoStack } from './lib/state.ts';
+import { createTodoStackTools } from './lib/tools.ts';
 import {
-  createGetTodoStackTool,
-  createUpdateTodoStackTool,
-} from './lib/tools.ts';
-import {
+  TODO_STACK_NO_FOCUS_CONTEXT_NAME,
   TODO_STACK_REMINDER_CONTEXT_NAME,
+  buildNoFocusGuardContext,
   buildTodoStackReminderContext,
 } from './lib/reminders.ts';
 import { renderTodoStackContext } from './lib/view.ts';
@@ -24,32 +23,36 @@ const name = 'todo-stack';
 const inject = ['tools', 'systemPrompt'];
 
 const DEFAULT_MAX_NODES = 200;
-const DEFAULT_MAX_READ_NODES = 80;
 const DEFAULT_CONTEXT_CHILDREN = 8;
 const DEFAULT_REMINDER_INTERVAL_NODES = 30;
 
 const TODO_STACK_GUIDANCE = [
-  '## Todo stack',
-  'Before the first non-todo tool call in work beyond one trivial deterministic action, focus one short task. With no <todo-stack> context, push it at expected_revision 0.',
-  'Keep exactly one task focused whenever pending work exists; blockers or waiting for user input do not clear focus.',
-  'Add and focus a direct child when you are about to do a distinct multi-action piece of work, unless the focused task will finish in the next few actions or has no distinct child worth tracking.',
-  'A short task tree makes work and progress visible to the user.',
-  'Keep each node to one short outcome; details stay in the conversation and workspace.',
-  'Complete verified work. Use exit only to return from a child to its pending parent. Leave siblings and ancestors unchanged.',
+  '## My todo stack',
+  'I maintain a persistent todo tree as my focus map across compacted turns and sessions and as the user\'s view of my task structure and progress.',
+  'Before every substantive or potentially blocking non-todo tool call, I first make sure the tree has one pending leaf whose outcome matches the work I am about to do. If no pending work exists, I create it; if focus is absent, I restore it; if the focused outcome is broader, I deepen it before that other tool call. Even one call must be tracked when it can block or require follow-up. Only an immediate final answer that needs no tool may skip the stack.',
+  'Each node names one brief, distinct outcome—not the steps, acceptance criteria, tool arguments, or final-answer requirements for producing it. For example, I write "Assess release readiness", not "Inspect once and report every evidence code". I do not copy an ancestor into a descendant, add a placeholder merely to finish its parent, or store plans, evidence, progress, notes, and implementation detail in a node.',
+  'Root siblings are independent top-level outcomes. When one goal has several checks or steps, I create that goal and deepen it into child outcomes before using non-todo tools; I do not flatten those steps into separate roots.',
+  'I add only current or established unconditional outcomes. A hypothetical branch, guessed future phase, reporting step, or bookkeeping action stays out until it becomes real work. A known later outcome belongs below its relevant task without losing focus.',
+  'When a tool reveals a blocker, I may complete a diagnostic outcome that is truly verified, but I keep the actual blocked outcome as a concise pending focus while I wait. I phrase it as objective plus dependency, for example "Deploy after credentials are provided"—never as status narration such as "Blocked: ...", "Waiting ...", or "Request input ...", and never with an error or evidence code.',
+  'I complete only verified outcomes and keep the tree synchronized with what I am actually doing. Detailed working context stays in the conversation or workspace.',
 ].join('\n');
 
 const TODO_STACK_INITIAL_GUIDANCE = [
-  '## Start with todo stack',
-  'If this request needs any non-todo tool call, create and focus one short root task now with expected_revision 0 unless one deterministic call is guaranteed to finish it.',
-  'A call that may block or require follow-up never qualifies for that exception.',
-  'A useful task tree makes your work and progress visible to the user.',
+  '## Before I get started',
+  'Before I begin substantive work or call another tool, my first tool action needs to create a brief todo stack and focus the concrete outcome I will handle first. It will guide me through compacted turns and sessions and make my task structure visible to the user. For example:',
+  '- [ ] Implement the dashboard',
+  '  - [ ] Implement task cards',
+  '    - [ ] Add drag and drop',
+  '      - [ ] Evaluate a suitable drag-and-drop approach (focus)',
+  '    - [ ] Style the task cards',
+  'For this example I would create only the dashboard root, then deepen it into task cards and their children. I would not pass those steps as extra root todos.',
+  'I will keep the tree concise but as deep as the real work requires. Root siblings are independent top-level outcomes; steps of one goal become children. I add only distinct, unconditional outcomes I already know; hypothetical branches and final-reporting steps stay out, and if no meaningful sibling is known I add none. I keep one meaningful leaf focused while working, including while waiting on a blocker.',
+  'If I am only giving an immediate final answer and doing no substantive work, I can finish without creating a stack.',
 ].join('\n');
 
 export interface Config {
   /** Maximum number of retained tree nodes. */
   maxNodes?: number;
-  /** Maximum nodes returned by one get_todo_stack call. */
-  maxReadNodes?: number;
   /** Direct children shown in the dynamic focus context. */
   contextChildren?: number;
   /** Publish the flattened `todos` projection consumed by the stock TodoDock. */
@@ -93,7 +96,6 @@ function isSessionOpening(session: Session, state: TodoStackState): boolean {
 
 function apply(ctx: Context, config: Config = {}): void {
   const maxNodes = positiveInteger(config.maxNodes, DEFAULT_MAX_NODES, 'maxNodes');
-  const maxReadNodes = positiveInteger(config.maxReadNodes, DEFAULT_MAX_READ_NODES, 'maxReadNodes');
   const contextChildren = positiveInteger(
     config.contextChildren,
     DEFAULT_CONTEXT_CHILDREN,
@@ -111,8 +113,9 @@ function apply(ctx: Context, config: Config = {}): void {
     if (todoDock) projectionCtx.sessionProjections.register(todoDockProjection());
   });
 
-  ctx.tools.register(createGetTodoStackTool(ctx, { maxNodes, maxReadNodes, contextChildren }));
-  ctx.tools.register(createUpdateTodoStackTool(ctx, { maxNodes, maxReadNodes, contextChildren }));
+  for (const tool of createTodoStackTools(ctx, { maxNodes, contextChildren })) {
+    ctx.tools.register(tool);
+  }
 
   ctx.systemPrompt.section({
     name: 'todo-stack:guidance',
@@ -144,13 +147,28 @@ function apply(ctx: Context, config: Config = {}): void {
 
   ctx.systemPrompt.context({
     name: TODO_STACK_REMINDER_CONTEXT_NAME,
-    order: 151,
+    order: 152,
     text: (assembly: AssembleContext) => {
       const agent: Agent | undefined = assembly.agent;
       if (agent === undefined) return '';
       return buildTodoStackReminderContext({
         session: agent.session,
         reminderIntervalNodes,
+      });
+    },
+  });
+
+  ctx.systemPrompt.context({
+    name: TODO_STACK_NO_FOCUS_CONTEXT_NAME,
+    order: 151,
+    text: (assembly: AssembleContext) => {
+      const agent: Agent | undefined = assembly.agent;
+      if (agent === undefined) return '';
+      const state = stateFor(ctx, agent.session);
+      return buildNoFocusGuardContext({
+        session: agent.session,
+        state,
+        opening: isSessionOpening(agent.session, state),
       });
     },
   });

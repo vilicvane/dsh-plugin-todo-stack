@@ -22,7 +22,11 @@ export interface TodoStackState {
 }
 
 export type TodoStackOperation =
+  | 'create'
+  | 'expand'
   | 'push'
+  | 'delete'
+  // Legacy operation names remain readable in persisted sessions.
   | 'add'
   | 'focus'
   | 'exit'
@@ -67,6 +71,20 @@ export interface TodoStackView {
   nodes: TodoNodeView[];
   counts: TodoStackCounts;
   truncated: boolean;
+}
+
+export interface CompleteTodoNodeView {
+  id: string;
+  todo: string;
+  status: TodoNodeStatus;
+  focused: boolean;
+  children: CompleteTodoNodeView[];
+}
+
+export interface CompleteTodoTreeView {
+  revision: number;
+  focusId: string | null;
+  roots: CompleteTodoNodeView[];
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {

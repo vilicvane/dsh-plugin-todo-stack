@@ -18,8 +18,14 @@ test('plugin loads through real Cordis services', async () => {
     await ctx.plugin(todoStackPlugin, {});
 
     const names = ctx.tools.schemas().map((tool) => tool.name);
-    assert.ok(names.includes('get_todo_stack'));
-    assert.ok(names.includes('update_todo_stack'));
+    assert.ok(names.includes('todo_stack__show'));
+    assert.ok(names.includes('todo_stack__create'));
+    assert.ok(names.includes('todo_stack__expand'));
+    assert.ok(names.includes('todo_stack__focus'));
+    assert.ok(names.includes('todo_stack__push'));
+    assert.ok(names.includes('todo_stack__complete'));
+    assert.ok(names.includes('todo_stack__delete'));
+    assert.ok(names.includes('todo_stack__edit'));
 
     const assembly = await ctx.systemPrompt.assemble();
     assert.ok(assembly.sections.some((section) => section.name === 'todo-stack:guidance'));
@@ -28,7 +34,7 @@ test('plugin loads through real Cordis services', async () => {
     const agentAssembly = await ctx.systemPrompt.assemble({ agent: { session } } as any);
     assert.match(
       agentAssembly.sections.find((section) => section.name === 'todo-stack:initial-guidance')?.text ?? '',
-      /create and focus one short root task now/,
+      /Before I begin substantive work/,
     );
     assert.equal(
       agentAssembly.contexts.find((context) => context.name === 'todo-stack:focus')?.text,

@@ -2,57 +2,64 @@
 
 ## Purpose
 
-todo-stack gives one DSH agent a persistent task tree and one focus pointer.
-The focus-to-root ancestor path is the stack. The tree records work structure;
-the focus records where the agent is working now.
+Todo Stack is a persistent task-focus anchor, not a general task database. Its
+tree preserves the structure of substantive work across compacted turns and
+sessions and exposes that structure to the user. One focused leaf records the
+agent's current point of attention.
 
-## State
+Nodes contain only a short task outcome and any constraint required to
+distinguish it. Plans, progress, findings, evidence, commands, file notes, and
+handoff narration remain in the conversation or workspace. A useful tree may
+be deep; brevity applies to each node, not to the hierarchy.
 
-- Each node has a stable id, one `content` string, parent, ordered children, and lifecycle
-  status: `pending`, `completed`, or `dropped`.
-- `content` is a short, stable core task anchor, preferably one concise outcome
-  phrase. It carries only the objective and any constraint required to
-  distinguish that task. There is no title-versus-details distinction and no
-  secondary description or notes field. Plans, progress, findings, evidence,
-  commands, file-by-file notes, and handoff narration remain in the conversation
-  or workspace rather than being copied into the tree.
-- New ids are short session-local references (`t1`, `t2`, ...). Legacy ids
-  remain canonical in restored sessions and are addressed through a unique
-  displayed prefix; exact ids continue to work.
-- `in_progress` is not stored. The single `focusId` is the execution pointer.
-- `focusId` is non-null exactly while pending work exists. A blocker or wait
-  state does not suspend focus; focus clears only when no pending node remains.
+## State and invariants
+
+Each node has a stable id, `content`, parent, ordered children, and a lifecycle
+status. New writes use `pending` and `completed`; `dropped` remains readable for
+legacy sessions.
+
+- New ids are short session-local references (`t1`, `t2`, ...). Legacy ids are
+  addressed through a unique displayed prefix; exact ids still work.
+- `focusId` is either null or points to one pending leaf.
+- A pending tree may temporarily have no focus between deliberate operations.
+- A terminal node cannot contain a pending descendant.
 - Parent progress is derived from descendants rather than stored separately.
-- Completed and dropped nodes remain in the tree; the MVP does not hard-delete
-  task history.
-- Every accepted mutation increments a compare-and-set `revision`.
+- Completed nodes remain as history. Deletion physically removes an entire
+  subtree and is not recoverable.
+- Every accepted mutation writes the next revision. Revisions serialize
+  durable snapshots internally; model tools do not expose compare-and-set
+  arguments.
 
-## Stack operations
+## Operations
 
-- `push`: create a child below the focus and focus it. With no focus, create a
-  root.
-- `exit`: move focus to the pending parent without changing lifecycle status.
-  Exiting a root is invalid because it would leave pending work unfocused.
-- `complete`: complete the focus and prefer its pending parent as the next
-  focus. If it has no pending parent, select another pending branch
-  deterministically. Pending descendants make completion fail.
-- `focus`: enter an existing pending node.
+`create` appends one ordered root group only when no pending work exists. Its
+first node becomes focus. Optional remaining roots are independent top-level
+outcomes; steps of the first goal belong below it. It works on an empty tree
+and after previous work has ended, preserving terminal history.
 
-`add`, `edit`, `move`, `drop`, and `reopen` maintain the surrounding tree.
-`edit` replaces only one node's `content`; structural and lifecycle changes use
-their dedicated operations.
-Dropping a subtree marks every non-completed node in it dropped and selects
-another pending focus when necessary. Reopening is top-down: ancestors must
-already be pending, and reopening an ended tree restores focus. Historical
-snapshots that contain pending work with no focus are normalized to their first
-pending leaf when read.
+`expand` decomposes the current focused leaf into ordered direct children. The
+first child becomes focus. Restricting expansion to the current focus makes it
+the explicit operation for diving deeper into active work.
+
+`push` appends one child below an identified pending parent. It preserves the
+existing focus by default or focuses the new child atomically. An unfocused
+push below the focused leaf is invalid because the old focus would cease to be
+a leaf; the error directs the agent to `todo_stack__expand`.
+
+`focus` selects an existing pending leaf. `complete` marks an identified node
+complete only after all descendants are terminal. Completing the focused node
+clears focus. `delete` removes an identified subtree and clears focus if it was
+inside that subtree. `edit` replaces only one node's `content`.
+
+The plugin never guesses a successor focus. If work continues after focus is
+cleared, the agent chooses an appropriate pending leaf or creates new focused
+work. This preserves the semantic difference between finishing one branch and
+deciding what matters next.
 
 ## Persistence
 
-The canonical mutation record is a whole-state snapshot. DSH rc.7 does not
-provide a downstream event-type registration API, and its persistence reader
-refuses unknown unmarked events. Therefore the MVP carries its namespaced
-snapshot in the already-known log-only `todo/write` event:
+The canonical mutation record is a whole-state snapshot carried by the known
+log-only `todo/write` event:
 
 ```ts
 {
@@ -66,87 +73,72 @@ snapshot in the already-known log-only `todo/write` event:
 }
 ```
 
-This is a compatibility carrier, not a dependency on
-`@deepseek-ai/dsh-tool-todo`. The plugin owns both model tools and both
-projections. If DSH gains third-party event registration, the envelope can move
-unchanged to `todo-stack/change`.
+The `todos` field is a compatibility projection carrier, not a dependency on
+`@deepseek-ai/dsh-tool-todo`. Folding validates that revisions are contiguous
+and every snapshot satisfies the tree invariants.
 
-Early development sessions that persisted the same single content string as
-`title` and recorded the corresponding operation as `rename` are normalized at
-the read boundary to `content` and `edit`. New state, projections, and model
-tools expose only the current vocabulary.
+Early snapshots using `title` and `rename` normalize at the read boundary to
+`content` and `edit`. Legacy non-leaf focus is moved to its first pending leaf.
+Existing explicit null focus is preserved because it now has deliberate
+semantics.
 
 ## Model context
 
-At the start of each turn, prompt assembly receives a focus-local tree view
-rather than a tree summary. Ancestors show only the active branch. At the
-working frontier, the focus node's direct children are shown; when focus is a
-leaf, its siblings are shown instead. Only a focused leaf carries the
-`（进行中）` annotation. The injected view remains stable until the first todo
-mutation in that turn, then clears. Every todo mutation result carries the newly
-rendered live branch, so repeated edits do not create updated or stale context
-snapshots; the next turn refreshes the injected view.
-Completing or exiting child work moves focus upward, so the next view exposes
-the new level's siblings. A bounded window always retains the focused leaf.
+The static prompt is a first-person working contract. It explains why the tree
+exists, keeps node contents brief, requires a meaningful leaf focus during
+substantive work, and distinguishes deeper current work from deferred work.
+The opening section adds a concrete deep-tree example and permits skipping the
+stack only for an immediate non-substantive answer.
 
-Global counts and unrelated branches are omitted. The complete tree is read
-lazily with `get_todo_stack`; it is not injected into every request. When no
-pending node remains, the plugin contributes no todo runtime context.
+At turn start, the agent receives a focus-local tree view. Ancestors show only
+the active branch. At the frontier, a branch focus exposes its direct children;
+a leaf focus exposes its siblings. Only the focused leaf carries the
+`（进行中）` annotation. The view is bounded but always retains the focus path.
 
-The prompt is deliberately direct and short. During a session's opening turn,
-an extra static section asks the agent to create and focus a short root task when
-the request needs any non-todo tool call, except one deterministic call guaranteed
-to finish the request. A call that may block or require follow-up never qualifies
-for that exception. The section disappears after the first
-completed turn or as soon as todo state exists; because it is a system section,
-it does not become a durable runtime-context snapshot in the transcript. The
-empty tree's initial revision is explicitly `0` so the agent can push that task
-without a preliminary read. When the agent is about to perform a distinct
-multi-action piece of focused work, it should add and focus one direct child
-unless the current task will finish in the next few
-actions or there is no distinct child worth tracking. Nodes remain short
-outcome anchors, while a useful hierarchy helps the user understand the current
-work and its progress. Details stay in conversation or workspace. Verified work
-is completed. Focused work blocked on user or external input remains focused
-while the agent asks for what is needed. Unrelated siblings and ancestors are
-left unchanged.
+That injected view remains frozen until the first Todo Stack mutation in the
+turn and then clears. Each mutation result carries the current live branch, so
+Todo Stack calls do not continually append fresh dynamic context snapshots.
+The complete tree is loaded explicitly with `todo_stack__show`.
 
-Two transient reminders reinforce that policy without changing persistent todo
-state. Every todo mutation result directly includes the updated focus-local
-tree and appends one short instruction to retain focus and add a child when it
-would make current work clearer, unless the focused task is nearly finished or
-has no distinct child worth tracking. Read results repeat the same maintenance
-instruction when a focus exists; results from other tools contain no such text.
-No dynamic system-prompt scan is involved. At 30, 60, 90, ... append-origin
-model-visible nodes in an open turn, a one-request checkpoint asks whether the
-agent thinks updating the current branch would make the work and progress
-clearer to the user. Runtime system-prompt snapshots are not counted. Durable
-named snapshot markers prevent the same node milestone from being announced
-twice across ordinary steps or process restarts. Both reminder forms stay short
-and keep working detail out of todo content.
+The `create` result also carries one short first-person granularity check. It
+asks the agent to expand before another tool only when the new root contains at
+least two independent outcomes, and explicitly excludes single tool calls,
+arguments, and final-answer requirements from becoming child todos. Limiting
+this reflection to `create` avoids over-decomposing an already precise leaf
+selected later with `focus`.
 
-This maintenance pressure is intentionally asymmetric. Capturing current work
-is proactive; creating, editing, moving, or polishing siblings and ancestors
-is not. Surrounding structure changes only when its objective, relationship, or
-lifecycle genuinely changes, or when the user requests maintenance. This keeps
-the tree small and outcome-oriented instead of growing a speculative exhaustive
-plan. `complete` means verified completion; `exit` means returning to a pending
-parent; `drop` records an abandoned branch. Work completed in one immediate
-step needs no node.
+Two dynamic reflections reinforce the contract:
+
+1. At every configured open-turn node milestone, a one-request first-person
+   reflection asks whether the tree still matches the work, whether current
+   focus should be decomposed, and whether later work should be recorded.
+2. Whenever focus is null, a first-person guard follows each eligible
+   model-visible node. It asks the agent to choose a pending leaf or create new
+   work before continuing, while allowing no focus during a final wrap-up.
+
+The no-focus marker includes the latest eligible surface sequence, so ignoring
+one reminder does not suppress later reminders. Runtime system-prompt snapshots
+are excluded from milestone counts and no-focus trigger selection, preventing
+self-recursion. Opening guidance suppresses the redundant first no-focus guard.
+
+Maintenance pressure is intentionally asymmetric. The agent proactively keeps
+its current branch and remembered later work synchronized, but does not polish
+unrelated ancestors or siblings without a real semantic change. This keeps the
+tree useful as an anchor rather than turning it into a detailed speculative
+plan.
 
 ## Web surface
 
-The plugin contributes its own `conversation.input.dock` entry under the
-standard `todo` cell. Its lower slot priority shadows the stock flat TodoDock
-when both are installed, without removing the compatibility projection.
+The plugin contributes a `conversation.input.dock` entry under the standard
+`todo` cell. Its lower slot priority shadows the stock flat TodoDock when both
+are installed without removing the flattened compatibility projection.
 
-The custom dock consumes `todoStack` directly. Tree depth is layout metadata,
-not node content; focus and lifecycle are separate visual states. It uses the
-Web client's semantic color and composer geometry tokens so it follows the
-host theme while retaining plugin-owned structure and styling.
+The custom dock consumes `todoStack` directly. Tree depth is layout metadata;
+focus and lifecycle are separate visual states. It uses host semantic color and
+composer geometry tokens so it follows the DSH theme.
 
 ## Scope
 
 State belongs to one agent session. A session fork inherits its prefix and then
 diverges independently. Shared multi-agent ownership, claims, leases,
-dependencies, priorities, and scheduling are outside the MVP.
+dependencies, priorities, scheduling, and rich task notes remain out of scope.

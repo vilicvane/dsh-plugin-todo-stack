@@ -17,12 +17,16 @@ export const MAX_CONTENT_CHARS = 240;
 export const MAX_TREE_DEPTH = 64;
 
 const OPERATIONS = new Set<TodoStackOperation>([
+  'create',
+  'expand',
   'push',
-  'add',
   'focus',
-  'exit',
   'complete',
+  'delete',
   'edit',
+  // Legacy persisted operation names.
+  'add',
+  'exit',
   'move',
   'drop',
   'reopen',
@@ -35,15 +39,13 @@ const STATUSES = new Set<TodoNodeStatus>([
 ]);
 
 export type TodoStackMutation =
-  | { action: 'push'; content: string }
-  | { action: 'add'; content: string; parentId?: string | null; afterId?: string }
+  | { action: 'create'; todos: string[] }
+  | { action: 'expand'; id: string; todos: string[] }
+  | { action: 'push'; parentId: string; content: string; focus: boolean }
   | { action: 'focus'; id: string }
-  | { action: 'exit' }
-  | { action: 'complete' }
-  | { action: 'edit'; id: string; content: string }
-  | { action: 'move'; id: string; parentId: string | null; afterId?: string }
-  | { action: 'drop'; id?: string }
-  | { action: 'reopen'; id: string };
+  | { action: 'complete'; id: string }
+  | { action: 'delete'; id: string }
+  | { action: 'edit'; id: string; content: string };
 
 export interface MutationOptions {
   maxNodes: number;
@@ -53,6 +55,7 @@ export interface MutationOptions {
 export interface MutationResult {
   state: TodoStackState;
   affectedId: string | null;
+  createdIds: string[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -63,6 +66,24 @@ function fail(message: string): never {
   throw new Error(`invalid todo stack: ${message}`);
 }
 
+function pendingLeafFromPersisted(
+  nodes: Record<string, unknown>,
+  id: unknown,
+  visited = new Set<string>(),
+): string | null {
+  if (typeof id !== 'string' || visited.has(id)) return null;
+  visited.add(id);
+  const node = nodes[id];
+  if (!isRecord(node) || node.status !== 'pending' || !Array.isArray(node.children)) return null;
+  if (node.children.length === 0) return id;
+  for (const childId of node.children) {
+    const leaf = pendingLeafFromPersisted(nodes, childId, visited);
+    if (leaf !== null) return leaf;
+  }
+  return null;
+}
+
+/** Normalize old title fields and old non-leaf focus without rewriting history. */
 function normalizePersistedState(value: unknown): unknown {
   if (!isRecord(value) || !isRecord(value.nodes)) return value;
   let changed = false;
@@ -77,42 +98,16 @@ function normalizePersistedState(value: unknown): unknown {
     nodes[id] = node;
     changed = true;
   }
+
   let focusId = value.focusId;
-  if (focusId === null) {
-    const pendingId = firstPersistedPendingFocus(nodes, value.roots);
-    if (pendingId !== null) {
-      focusId = pendingId;
+  if (typeof focusId === 'string') {
+    const focused = nodes[focusId];
+    if (isRecord(focused) && Array.isArray(focused.children) && focused.children.length > 0) {
+      focusId = pendingLeafFromPersisted(nodes, focusId);
       changed = true;
     }
   }
   return changed ? { ...value, nodes, focusId } : value;
-}
-
-/** Repair pre-invariant snapshots that retained pending work without a focus. */
-function firstPersistedPendingFocus(
-  nodes: Record<string, unknown>,
-  roots: unknown,
-): string | null {
-  if (!Array.isArray(roots)) return null;
-  const visited = new Set<string>();
-  const descend = (id: unknown): string | null => {
-    if (typeof id !== 'string' || visited.has(id)) return null;
-    visited.add(id);
-    const node = nodes[id];
-    if (!isRecord(node) || node.status !== 'pending') return null;
-    if (Array.isArray(node.children)) {
-      for (const childId of node.children) {
-        const pending = descend(childId);
-        if (pending !== null) return pending;
-      }
-    }
-    return id;
-  };
-  for (const rootId of roots) {
-    const pending = descend(rootId);
-    if (pending !== null) return pending;
-  }
-  return null;
 }
 
 export function emptyTodoStack(): TodoStackState {
@@ -151,7 +146,9 @@ export function assertTodoStackState(value: unknown): asserts value is TodoStack
   for (const [key, rawNode] of Object.entries(nodes)) {
     if (!isRecord(rawNode)) fail(`node ${JSON.stringify(key)} must be an object`);
     if (rawNode.id !== key) fail(`node map key ${JSON.stringify(key)} does not match its id`);
-    if (typeof rawNode.content !== 'string' || rawNode.content.length === 0 || rawNode.content.trim() !== rawNode.content) {
+    if (typeof rawNode.content !== 'string'
+      || rawNode.content.length === 0
+      || rawNode.content.trim() !== rawNode.content) {
       fail(`node ${JSON.stringify(key)} has empty or untrimmed content`);
     }
     if (rawNode.content.length > MAX_CONTENT_CHARS) {
@@ -221,12 +218,7 @@ export function assertTodoStackState(value: unknown): asserts value is TodoStack
     const focused = nodes[value.focusId] as unknown as TodoStackNode | undefined;
     if (focused === undefined) fail(`focus ${JSON.stringify(value.focusId)} does not exist`);
     if (focused.status !== 'pending') fail('focus must point to a pending node');
-  }
-  const hasPending = Object.values(nodes).some(
-    (node) => (node as unknown as TodoStackNode).status === 'pending',
-  );
-  if (hasPending !== (value.focusId !== null)) {
-    fail('focus must exist exactly while pending work exists');
+    if (focused.children.length > 0) fail('focus must point to a leaf node');
   }
 }
 
@@ -296,33 +288,22 @@ function nextTodoId(state: TodoStackState): string {
   return `t${number}`;
 }
 
-/**
- * Return the stable model-facing reference for one canonical node id.
- * New nodes already use compact `tN` ids. Legacy ids retain their canonical
- * identity and are exposed through the shortest unique prefix of at least six
- * characters, so old sessions do not require a state migration.
- */
 export function todoNodeRef(state: TodoStackState, id: string): string {
   requireNode(state, id);
   if (SHORT_ID_PATTERN.test(id) || id.length <= 6) return id;
   const ids = Object.keys(state.nodes);
   for (let length = 6; length < id.length; length += 1) {
     const prefix = id.slice(0, length);
-    if (ids.every((candidate) => candidate === id || !candidate.startsWith(prefix))) {
-      return prefix;
-    }
+    if (ids.every((candidate) => candidate === id || !candidate.startsWith(prefix))) return prefix;
   }
   return id;
 }
 
-/** Resolve an exact canonical id, compact id, or unambiguous legacy prefix. */
 export function resolveTodoNodeId(state: TodoStackState, reference: string): string {
   if (state.nodes[reference] !== undefined) return reference;
   const matches = Object.keys(state.nodes).filter((id) => id.startsWith(reference));
   if (matches.length === 1) return matches[0];
-  if (matches.length > 1) {
-    throw new Error(`todo node reference ${JSON.stringify(reference)} is ambiguous`);
-  }
+  if (matches.length > 1) throw new Error(`todo node reference ${JSON.stringify(reference)} is ambiguous`);
   throw new Error(`todo node ${JSON.stringify(reference)} does not exist`);
 }
 
@@ -338,25 +319,6 @@ function removePlacement(state: TodoStackState, id: string): void {
   siblings.splice(index, 1);
 }
 
-function insertPlacement(
-  state: TodoStackState,
-  id: string,
-  parentId: string | null,
-  afterId?: string,
-): void {
-  const siblings = childList(state, parentId);
-  if (afterId === undefined) {
-    siblings.push(id);
-    return;
-  }
-  if (afterId === id) throw new Error('a node cannot be placed after itself');
-  const index = siblings.indexOf(afterId);
-  if (index < 0) {
-    throw new Error(`after_id ${JSON.stringify(afterId)} is not a child of the destination parent`);
-  }
-  siblings.splice(index + 1, 0, id);
-}
-
 function isInSubtree(state: TodoStackState, rootId: string, candidateId: string): boolean {
   if (rootId === candidateId) return true;
   const pending = [...requireNode(state, rootId).children];
@@ -368,8 +330,8 @@ function isInSubtree(state: TodoStackState, rootId: string, candidateId: string)
   return false;
 }
 
-function subtreeHasPending(state: TodoStackState, rootId: string): boolean {
-  const pending = [rootId];
+function descendantsHavePending(state: TodoStackState, rootId: string): boolean {
+  const pending = [...requireNode(state, rootId).children];
   while (pending.length > 0) {
     const id = pending.pop() as string;
     const node = requireNode(state, id);
@@ -379,29 +341,37 @@ function subtreeHasPending(state: TodoStackState, rootId: string): boolean {
   return false;
 }
 
-function firstPendingFocus(state: TodoStackState): string | null {
-  const descend = (id: string): string | null => {
-    const node = requireNode(state, id);
-    if (node.status !== 'pending') return null;
-    for (const childId of node.children) {
-      const pending = descend(childId);
-      if (pending !== null) return pending;
-    }
-    return id;
-  };
-  for (const rootId of state.roots) {
-    const pending = descend(rootId);
-    if (pending !== null) return pending;
-  }
-  return null;
+export function hasPendingTodos(state: TodoStackState): boolean {
+  return Object.values(state.nodes).some((node) => node.status === 'pending');
 }
 
-function fallbackFocus(state: TodoStackState, preferredParentId: string | null): string | null {
-  if (preferredParentId !== null) {
-    const parent = requireNode(state, preferredParentId);
-    if (parent.status === 'pending') return parent.id;
+function validateOptions(options: MutationOptions): void {
+  if (!Number.isSafeInteger(options.maxNodes) || options.maxNodes < 1) {
+    throw new Error('maxNodes must be a positive safe integer');
   }
-  return firstPendingFocus(state);
+}
+
+function createNodes(
+  state: TodoStackState,
+  parentId: string | null,
+  contents: string[],
+  options: MutationOptions,
+): string[] {
+  if (contents.length === 0) throw new Error('at least one todo is required');
+  if (Object.keys(state.nodes).length + contents.length > options.maxNodes) {
+    throw new Error(`todo stack is limited to ${options.maxNodes} nodes`);
+  }
+  const createId = options.createId ?? (() => nextTodoId(state));
+  const ids: string[] = [];
+  for (const rawContent of contents) {
+    const content = normalizeContent(rawContent);
+    let id = createId();
+    while (state.nodes[id] !== undefined) id = createId();
+    state.nodes[id] = { id, content, parentId, children: [], status: 'pending' };
+    childList(state, parentId).push(id);
+    ids.push(id);
+  }
+  return ids;
 }
 
 function finalizeMutation(state: TodoStackState, previousRevision: number): TodoStackState {
@@ -416,113 +386,84 @@ export function mutateTodoStack(
   options: MutationOptions,
 ): MutationResult {
   assertTodoStackState(current);
-  if (!Number.isSafeInteger(options.maxNodes) || options.maxNodes < 1) {
-    throw new Error('maxNodes must be a positive safe integer');
-  }
+  validateOptions(options);
   const state = cloneState(current);
-  const createId = options.createId ?? (() => nextTodoId(state));
   let affectedId: string | null = null;
+  let createdIds: string[] = [];
 
-  if (mutation.action === 'push' || mutation.action === 'add') {
-    if (Object.keys(state.nodes).length >= options.maxNodes) {
-      throw new Error(`todo stack is limited to ${options.maxNodes} nodes`);
+  if (mutation.action === 'create') {
+    if (hasPendingTodos(state)) {
+      throw new Error('cannot create new root todos while pending work exists; focus an existing pending leaf first');
     }
-    const content = normalizeContent(mutation.content);
-    const parentId = mutation.action === 'push'
-      ? state.focusId
-      : mutation.parentId === undefined ? state.focusId : mutation.parentId;
-    if (parentId !== null && requireNode(state, parentId).status !== 'pending') {
-      throw new Error('new work can only be added below a pending node');
+    createdIds = createNodes(state, null, mutation.todos, options);
+    state.focusId = createdIds[0];
+    affectedId = createdIds[0];
+  } else if (mutation.action === 'expand') {
+    const node = requireNode(state, mutation.id);
+    if (node.id !== state.focusId) {
+      throw new Error('todo_stack__expand can only decompose the current focus; focus this leaf first');
     }
-    let id = createId();
-    while (state.nodes[id] !== undefined) id = createId();
-    state.nodes[id] = {
-      id,
-      content,
-      parentId,
-      children: [],
-      status: 'pending',
-    };
-    insertPlacement(state, id, parentId, mutation.action === 'add' ? mutation.afterId : undefined);
-    if (mutation.action === 'push' || state.focusId === null) state.focusId = id;
-    affectedId = id;
+    if (node.status !== 'pending' || node.children.length > 0) {
+      throw new Error('todo_stack__expand requires the current pending leaf');
+    }
+    createdIds = createNodes(state, node.id, mutation.todos, options);
+    state.focusId = createdIds[0];
+    affectedId = node.id;
+  } else if (mutation.action === 'push') {
+    const parent = requireNode(state, mutation.parentId);
+    if (parent.status !== 'pending') throw new Error('new work can only be added below a pending todo');
+    if (parent.id === state.focusId && !mutation.focus) {
+      throw new Error(
+        'cannot add an unfocused child below the focused leaf because focus must remain on a leaf; '
+        + 'use todo_stack__expand to decompose the focused task',
+      );
+    }
+    createdIds = createNodes(state, parent.id, [mutation.content], options);
+    if (mutation.focus) state.focusId = createdIds[0];
+    affectedId = createdIds[0];
   } else if (mutation.action === 'focus') {
     const node = requireNode(state, mutation.id);
-    if (node.status !== 'pending') throw new Error('only a pending node can receive focus');
+    if (node.status !== 'pending' || node.children.length > 0) {
+      throw new Error('todo_stack__focus requires a pending leaf todo');
+    }
     if (state.focusId === node.id) throw new Error('todo node is already focused');
     state.focusId = node.id;
     affectedId = node.id;
-  } else if (mutation.action === 'exit') {
-    if (state.focusId === null) throw new Error('todo stack has no current focus to exit');
-    const focused = requireNode(state, state.focusId);
-    if (focused.parentId === null) {
-      throw new Error('cannot exit a pending root; complete or drop it, or focus another pending task');
-    }
-    affectedId = focused.id;
-    state.focusId = focused.parentId;
   } else if (mutation.action === 'complete') {
-    if (state.focusId === null) throw new Error('todo stack has no current focus to complete');
-    const focused = requireNode(state, state.focusId);
-    if (focused.children.some((id) => subtreeHasPending(state, id))) {
-      throw new Error('cannot complete a node while its subtree contains pending work');
+    const node = requireNode(state, mutation.id);
+    if (node.status !== 'pending') throw new Error('only pending work can be completed');
+    if (descendantsHavePending(state, node.id)) {
+      throw new Error('cannot complete a todo while its subtree contains pending work');
     }
-    focused.status = 'completed';
-    state.focusId = fallbackFocus(state, focused.parentId);
-    affectedId = focused.id;
+    node.status = 'completed';
+    if (state.focusId === node.id) state.focusId = null;
+    affectedId = node.id;
+  } else if (mutation.action === 'delete') {
+    const node = requireNode(state, mutation.id);
+    if (state.focusId !== null && isInSubtree(state, node.id, state.focusId)) state.focusId = null;
+    const deleting = [node.id];
+    const ids: string[] = [];
+    while (deleting.length > 0) {
+      const id = deleting.pop() as string;
+      const candidate = requireNode(state, id);
+      deleting.push(...candidate.children);
+      ids.push(id);
+    }
+    removePlacement(state, node.id);
+    for (const id of ids) delete state.nodes[id];
+    affectedId = node.id;
   } else if (mutation.action === 'edit') {
     const node = requireNode(state, mutation.id);
     const content = normalizeContent(mutation.content);
-    if (node.content === content) throw new Error('edit would not change the node content');
+    if (node.content === content) throw new Error('edit would not change the todo content');
     node.content = content;
-    affectedId = node.id;
-  } else if (mutation.action === 'move') {
-    const node = requireNode(state, mutation.id);
-    if (mutation.parentId !== null) {
-      const parent = requireNode(state, mutation.parentId);
-      if (isInSubtree(state, node.id, parent.id)) {
-        throw new Error('cannot move a node below itself or one of its descendants');
-      }
-      if (parent.status !== 'pending' && subtreeHasPending(state, node.id)) {
-        throw new Error('pending work cannot be moved below a completed or dropped node');
-      }
-    }
-    const before = JSON.stringify({ parentId: node.parentId, siblings: childList(state, node.parentId) });
-    removePlacement(state, node.id);
-    node.parentId = mutation.parentId;
-    insertPlacement(state, node.id, mutation.parentId, mutation.afterId);
-    const after = JSON.stringify({ parentId: node.parentId, siblings: childList(state, node.parentId) });
-    if (before === after) throw new Error('move would not change the tree');
-    affectedId = node.id;
-  } else if (mutation.action === 'drop') {
-    const id = mutation.id ?? state.focusId;
-    if (id === null) throw new Error('drop requires an id when the stack has no focus');
-    const node = requireNode(state, id);
-    if (node.status !== 'pending') throw new Error('only pending work can be dropped');
-    const pending = [id];
-    while (pending.length > 0) {
-      const currentId = pending.pop() as string;
-      const currentNode = requireNode(state, currentId);
-      if (currentNode.status !== 'completed') currentNode.status = 'dropped';
-      pending.push(...currentNode.children);
-    }
-    if (state.focusId !== null && isInSubtree(state, id, state.focusId)) {
-      state.focusId = fallbackFocus(state, node.parentId);
-    }
-    affectedId = id;
-  } else if (mutation.action === 'reopen') {
-    const node = requireNode(state, mutation.id);
-    if (node.status === 'pending') throw new Error('todo node is already pending');
-    if (node.parentId !== null && requireNode(state, node.parentId).status !== 'pending') {
-      throw new Error('reopen the node ancestors before reopening this node');
-    }
-    node.status = 'pending';
-    if (state.focusId === null) state.focusId = node.id;
     affectedId = node.id;
   }
 
   return {
     state: finalizeMutation(state, current.revision),
     affectedId,
+    createdIds,
   };
 }
 
