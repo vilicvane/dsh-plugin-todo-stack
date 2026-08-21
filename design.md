@@ -125,12 +125,14 @@ long turn:
    work before continuing, while allowing no focus during a final wrap-up.
 
 The turn-start reflection is recorded once in that turn's runtime-context
-snapshot. The no-focus marker includes the latest eligible surface sequence,
-so ignoring one reminder does not suppress later reminders. Runtime
-system-prompt snapshots are excluded from no-focus trigger selection,
-preventing self-recursion. Opening guidance suppresses the redundant first
-no-focus guard, and null focus suppresses the less specific turn-start
-reflection.
+snapshot. Before the inbox message has reached the surface, the no-focus
+marker identifies the open turn; afterwards it includes the latest eligible
+surface sequence, so ignoring one reminder does not suppress later reminders.
+Runtime system-prompt snapshots are excluded from no-focus trigger selection,
+preventing self-recursion. Opening guidance is runtime context so a complete
+persona cannot suppress Todo Stack initialization; it also suppresses the
+redundant first no-focus guard. Null focus suppresses the less specific
+turn-start reflection.
 
 Maintenance pressure is intentionally asymmetric. The agent proactively keeps
 its current branch and remembered later work synchronized, but does not polish

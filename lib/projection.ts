@@ -41,7 +41,7 @@ export const todosProjectionSchema = z.union([
 export function todoStackProjection(): ProjectionDefinition<'todoStack', TodoStackState> {
   return {
     key: 'todoStack',
-    schema: todoStackProjectionSchema,
+    stateSchema: todoStackProjectionSchema,
     init: emptyTodoStack,
     apply(state, event) {
       const envelope = extractTodoStackEnvelope(event);
@@ -53,7 +53,10 @@ export function todoStackProjection(): ProjectionDefinition<'todoStack', TodoSta
       }
       return envelope.state;
     },
-    view: (state) => state,
+    wire: {
+      viewSchema: todoStackProjectionSchema,
+      view: (state) => state,
+    },
     stateVersion: 1,
   };
 }
@@ -61,14 +64,17 @@ export function todoStackProjection(): ProjectionDefinition<'todoStack', TodoSta
 export function todoDockProjection(): ProjectionDefinition<'todos', TodoItem[] | null> {
   return {
     key: 'todos',
-    schema: todosProjectionSchema,
+    stateSchema: todosProjectionSchema,
     init: () => null,
     apply(state, event) {
       const envelope = extractTodoStackEnvelope(event);
       if (envelope === undefined) return state;
       return todoDockItems(envelope.state);
     },
-    view: (state) => state,
+    wire: {
+      viewSchema: todosProjectionSchema,
+      view: (state) => state,
+    },
     stateVersion: 1,
   };
 }

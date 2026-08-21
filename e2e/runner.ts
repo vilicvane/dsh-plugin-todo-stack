@@ -138,6 +138,7 @@ async function run(ctx: any): Promise<void> {
       name: 'todo-stack:e2e-protocol',
       order: 149,
       text: 'This is a deterministic todo-stack integration test. Perform exactly the requested tool calls in order, never repeat a recorded call, and make no extra tree mutation. Runtime-context reminders continue the same sequence rather than restarting it.',
+      complete: true,
     });
   };
 
@@ -163,6 +164,11 @@ async function run(ctx: any): Promise<void> {
     assert.equal(state.nodes.t1.content, ROOT_CONTENT);
     assert.equal(state.focusId, 't1');
     assert.equal(probeCalls, 1);
+    assert.equal(
+      contextSections(liveHandle.agent.session, 'todo-stack:initial-guidance').length,
+      1,
+      'complete persona must not suppress the opening todo-stack runtime context',
+    );
     assertOperations(liveHandle.agent.session, ['create'], 'create turn');
     assertVisibleTools(liveHandle.agent.session, 'live session');
     const createdText = toolResultText(toolResultsFor(liveHandle.agent.session, 'todo_stack__create')[0]);

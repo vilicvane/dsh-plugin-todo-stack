@@ -45,9 +45,13 @@ export function buildNoFocusGuardContext(options: {
 }): string {
   if (options.opening || options.state.focusId !== null) return '';
   const afterSeq = latestEligibleSurfaceSeq(options.session);
-  if (afterSeq === undefined) return '';
+  const turn = openTurnNumber(options.session);
+  if (afterSeq === undefined && turn === null) return '';
+  const position = afterSeq === undefined
+    ? `turn="${turn}"`
+    : `after-node="${afterSeq}"`;
   return [
-    `<todo-stack-no-focus after-node="${afterSeq}">`,
+    `<todo-stack-no-focus ${position}>`,
     'I currently have no todo focus. Before I continue working, I need to restore one: choose a meaningful pending leaf, or create a new focused todo if more work remains. If I am only wrapping up and summarizing completed work, I can continue without one.',
     '</todo-stack-no-focus>',
   ].join('\n');

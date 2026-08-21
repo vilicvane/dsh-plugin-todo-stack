@@ -88,6 +88,11 @@ export interface CompleteTodoTreeView {
 }
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    todoStack: TodoStackState;
+    todos: TodoItem[] | null;
+  }
+
   interface SessionProjectionMap {
     todoStack: TodoStackState;
     todos: TodoItem[] | null;

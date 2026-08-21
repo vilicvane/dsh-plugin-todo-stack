@@ -68,7 +68,7 @@ function positiveInteger(value: number | undefined, fallback: number, name: stri
 
 function stateFor(ctx: Context, session: Session): TodoStackState {
   const registry = ctx.get('sessionProjections') as SessionProjectionRegistry | undefined;
-  return registry?.snapshot(session).values.todoStack ?? foldTodoStack(session.events);
+  return registry?.stateOf(session, 'todoStack') ?? foldTodoStack(session.events);
 }
 
 /** Keep turn-start context only until the first todo mutation; results carry live updates. */
@@ -101,8 +101,13 @@ function apply(ctx: Context, config: Config = {}): void {
   const todoDock = config.todoDock !== false;
 
   ctx.inject(['sessionProjections'], (projectionCtx) => {
-    projectionCtx.sessionProjections.register(todoStackProjection());
-    if (todoDock) projectionCtx.sessionProjections.register(todoDockProjection());
+    const registry = projectionCtx.sessionProjections as unknown as {
+      register(
+        definition: ReturnType<typeof todoStackProjection> | ReturnType<typeof todoDockProjection>,
+      ): () => void;
+    };
+    registry.register(todoStackProjection());
+    if (todoDock) registry.register(todoDockProjection());
   });
 
   for (const tool of createTodoStackTools(ctx, { maxNodes, contextChildren })) {
@@ -115,9 +120,9 @@ function apply(ctx: Context, config: Config = {}): void {
     text: TODO_STACK_GUIDANCE,
   });
 
-  ctx.systemPrompt.section({
+  ctx.systemPrompt.context({
     name: 'todo-stack:initial-guidance',
-    order: 151,
+    order: 149,
     text: (assembly: AssembleContext) => {
       const agent: Agent | undefined = assembly.agent;
       if (agent === undefined) return '';

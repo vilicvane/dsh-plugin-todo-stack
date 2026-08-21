@@ -28,9 +28,9 @@ working context stays in the conversation or workspace.
 Focus may point only to a pending leaf. Completing or deleting the focused node
 clears focus instead of guessing what the agent should do next. If substantive
 work continues, the agent must deliberately focus another pending leaf or
-create new focused work. A short no-focus reminder repeats after model-visible
-nodes until that happens; it allows no focus only while wrapping up completed
-work.
+create new focused work. A short no-focus reminder appears on the first model
+request of an already initialized turn and repeats after model-visible nodes
+until that happens; it allows no focus only while wrapping up completed work.
 
 `push` is for recording deferred work under an existing task. An unfocused
 push below the focused leaf would turn that leaf into a branch, so it is
@@ -71,6 +71,8 @@ The plugin registers:
 - a Web `TodoStackDock` that renders hierarchy, focus, and lifecycle;
 - a flattened `todos` compatibility projection for clients without the custom
   dock;
+- opening guidance as runtime context, so a complete persona cannot suppress
+  Todo Stack initialization;
 - turn-start context containing the focused branch and one brief
   synchronization reflection;
 - the live updated branch in every mutation result, with `complete` showing

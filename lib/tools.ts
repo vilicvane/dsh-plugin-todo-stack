@@ -23,9 +23,7 @@ export interface TodoStackRuntimeSettings {
 
 interface RuntimeContext {
   get(name: 'sessionProjections'): {
-    snapshot(session: unknown): {
-      values: { todoStack?: TodoStackState };
-    };
+    stateOf(session: unknown, key: 'todoStack'): TodoStackState | undefined;
   } | undefined;
 }
 
@@ -53,7 +51,7 @@ function renderToolValue(_args: unknown, value: JsonValue): Array<{ type: 'text'
 }
 
 function stateFor(ctx: RuntimeContext, session: SessionLike): TodoStackState {
-  const projected = ctx.get('sessionProjections')?.snapshot(session).values.todoStack;
+  const projected = ctx.get('sessionProjections')?.stateOf(session, 'todoStack');
   return projected ?? foldTodoStack(session.events);
 }
 

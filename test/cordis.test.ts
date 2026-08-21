@@ -33,7 +33,7 @@ test('plugin loads through real Cordis services', async () => {
     const session = Session.create(SessionId('session-cordis-smoke'));
     const agentAssembly = await ctx.systemPrompt.assemble({ agent: { session } } as any);
     assert.match(
-      agentAssembly.sections.find((section) => section.name === 'todo-stack:initial-guidance')?.text ?? '',
+      agentAssembly.contexts.find((context) => context.name === 'todo-stack:initial-guidance')?.text ?? '',
       /Before I begin substantive work/,
     );
     assert.equal(
@@ -43,6 +43,24 @@ test('plugin loads through real Cordis services', async () => {
     assert.equal(
       agentAssembly.contexts.find((context) => context.name === 'todo-stack:turn-start')?.text,
       '',
+    );
+
+    ctx.systemPrompt.section({
+      name: 'test:complete-persona',
+      order: 0,
+      text: 'Complete test persona.',
+      complete: true,
+    });
+    const completeAssembly = await ctx.systemPrompt.assemble({ agent: { session } } as any);
+    assert.deepEqual(
+      completeAssembly.sections.map((section) => section.name),
+      ['test:complete-persona'],
+    );
+    assert.match(
+      completeAssembly.contexts.find(
+        (context) => context.name === 'todo-stack:initial-guidance',
+      )?.text ?? '',
+      /Before I begin substantive work/,
     );
 
     const values = ctx.sessionProjections.snapshot(session).values;

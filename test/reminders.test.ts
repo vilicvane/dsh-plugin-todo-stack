@@ -152,6 +152,32 @@ describe('todo stack dynamic reminders', () => {
     assert.notEqual(second, first);
   });
 
+  test('no-focus guard is present at turn start before the inbox message reaches the surface', () => {
+    const session = fixtureSession();
+    const state: TodoStackState = {
+      version: 1,
+      revision: 1,
+      roots: ['t1'],
+      nodes: {
+        t1: {
+          id: 't1',
+          content: 'Pending work',
+          parentId: null,
+          children: [],
+          status: 'pending',
+        },
+      },
+      focusId: null,
+    };
+
+    assert.equal(buildNoFocusGuardContext({ session, state, opening: false }), '');
+    session.append('turn/start', { turn: 3 });
+    assert.match(
+      buildNoFocusGuardContext({ session, state, opening: false }),
+      /todo-stack-no-focus turn="3"/,
+    );
+  });
+
   test('no-focus guard is suppressed by opening guidance or an existing focus', () => {
     const session = fixtureSession();
     session.append('turn/start', { turn: 1 });

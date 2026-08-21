@@ -58,9 +58,10 @@ test('plugin registers namespaced tools, projections, and first-person prompts',
     properties: {},
   });
   assert.deepEqual(captured.projections.map((item) => item.key), ['todoStack', 'todos']);
-  assert.equal(captured.sections.length, 2);
-  assert.equal(captured.contexts.length, 3);
+  assert.equal(captured.sections.length, 1);
+  assert.equal(captured.contexts.length, 4);
   assert.deepEqual(captured.contexts.map((item) => item.name), [
+    'todo-stack:initial-guidance',
     'todo-stack:focus',
     'todo-stack:turn-start',
     'todo-stack:no-focus',
@@ -73,7 +74,7 @@ test('plugin registers namespaced tools, projections, and first-person prompts',
   assert.match(guidance, /brief, distinct outcome/);
   assert.match(guidance, /do not copy an ancestor into a descendant/);
 
-  const initial = captured.sections.find((item) => item.name === 'todo-stack:initial-guidance');
+  const initial = captured.contexts.find((item) => item.name === 'todo-stack:initial-guidance');
   const openingSession = Session.create(SessionId('session-initial-guidance'));
   const text = initial.text({ agent: { session: openingSession } });
   assert.match(text, /Before I begin substantive work/);
