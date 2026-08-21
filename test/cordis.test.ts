@@ -41,7 +41,7 @@ test('plugin loads through real Cordis services', async () => {
       '',
     );
     assert.equal(
-      agentAssembly.contexts.find((context) => context.name === 'todo-stack:reminder')?.text,
+      agentAssembly.contexts.find((context) => context.name === 'todo-stack:turn-start')?.text,
       '',
     );
 

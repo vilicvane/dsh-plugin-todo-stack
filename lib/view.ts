@@ -136,9 +136,21 @@ function formatNode(
   depth: number,
   markCurrent: boolean,
 ): string {
-  const status = node.status === 'pending' ? ' ' : node.status === 'completed' ? 'x' : '-';
-  const current = markCurrent ? '（进行中）' : '';
-  return `${'  '.repeat(depth)}- [${status}] ${todoNodeRef(state, node.id)} ${node.content}${current}`;
+  const status = markCurrent
+    ? '*'
+    : node.status === 'pending' ? ' ' : node.status === 'completed' ? 'x' : '-';
+  return `${'  '.repeat(depth)}- [${status}] ${todoNodeRef(state, node.id)} ${node.content}`;
+}
+
+function pathToNode(state: TodoStackState, id: string): TodoStackNode[] {
+  const reversed: TodoStackNode[] = [];
+  let currentId: string | null = id;
+  while (currentId !== null) {
+    const node = requireNode(state, currentId);
+    reversed.push(node);
+    currentId = node.parentId;
+  }
+  return reversed.reverse();
 }
 
 interface VisibleChildren {
@@ -215,6 +227,32 @@ export function renderTodoStackContext(state: TodoStackState, childLimit: number
       ));
     }
     if (frontier.after > 0) lines.push(`${'  '.repeat(depth)}- … ${frontier.after} more`);
+  }
+
+  lines.push('</todo-stack>');
+  return lines.join('\n');
+}
+
+/** Render the affected node's placement so the next sibling can be chosen without `show`. */
+export function renderTodoStackSiblingContext(state: TodoStackState, id: string): string {
+  assertTodoStackState(state);
+  const affected = requireNode(state, id);
+  const parent = affected.parentId === null ? null : requireNode(state, affected.parentId);
+  const ancestors = parent === null ? [] : pathToNode(state, parent.id);
+  const siblingIds = parent === null ? state.roots : parent.children;
+  const lines = [`<todo-stack revision="${state.revision}">`];
+
+  for (const [depth, node] of ancestors.entries()) {
+    lines.push(formatNode(state, node, depth, node.id === state.focusId));
+  }
+  for (const siblingId of siblingIds) {
+    const sibling = requireNode(state, siblingId);
+    lines.push(formatNode(
+      state,
+      sibling,
+      ancestors.length,
+      sibling.id === state.focusId,
+    ));
   }
 
   lines.push('</todo-stack>');

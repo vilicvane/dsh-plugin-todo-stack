@@ -78,7 +78,7 @@ the agent's continuing working state and self-commitment rather than detached
 policy text.
 
 The wording below is directional rather than final. Before implementation, the
-opening and mid-work prompts should be rewritten together as one coherent
+opening and turn-start prompts should be rewritten together as one coherent
 prompt design rather than accumulated through local wording patches.
 
 ### Opening prompt
@@ -108,28 +108,36 @@ specific piece of work currently being handled. The example should use short,
 concrete outcomes rather than generic labels such as `category` and
 `subcategory`.
 
-### Mid-work reflection
+### Turn-start reflection
 
-The mid-work reminder asks the agent to actively check whether its work is
-still synchronized with the Todo Stack. It maps common intentions directly to
-the corresponding tools.
+The reflection asks the agent to actively check whether its work is still
+synchronized with the Todo Stack at the beginning of each later turn. This is
+the natural reorientation point after ordinary or automatic turn compaction,
+and avoids competing with Turn Memory's stop-and-handoff reminder inside a long
+turn.
 
 ```text
-I need to reflect now on whether I am still synchronized with the todo stack:
-- Diving deeper? Break down the current focus and move focus to the next
-  concrete step.
-- Remembered something to handle later? Add it below the relevant task without
-  losing my current focus.
-- In any case, I have to keep the stack up to date. Otherwise I could completely
-  lose focus during turn and session compaction, and the user would no longer
-  be able to understand the structure of my plan.
+I am starting a new turn, so I need to reflect on whether I am still
+synchronized with the todo stack:
+- Does the current focus still match the next concrete work?
+- Am I diving deeper? I should break down the focus when that would make the
+  work structure clearer.
+- Did I identify something to handle later? I should add it below the relevant
+  todo without losing my current focus.
+- If the stack already reflects the work accurately, I can continue without
+  changing it.
 ```
 
-The mid-work prompt deliberately uses natural language instead of naming tools.
+The turn-start prompt deliberately uses natural language instead of naming tools.
 This keeps it sounding like the agent's own reflection and encourages the agent
 to inspect the complete tool descriptions before choosing an operation. It
 still states the intended tree behavior precisely enough to distinguish
 decomposing current work from recording deferred work elsewhere.
+
+The earlier 30-node reminder is removed rather than retained as a fallback.
+This deployment uses Todo Stack together with Turn Memory: Turn Memory owns
+long-turn stopping and continuation, while Todo Stack resynchronizes focus at
+the next turn boundary. Null focus remains covered by its dedicated guard.
 
 ### `todo_stack__create`
 
@@ -250,7 +258,9 @@ todo_stack__edit(
   ordered roots, ids, content, lifecycle, focus flags, and children.
 - Mutation results return `operation`, `revision`, `affectedId`, `createdIds`,
   and `focusId`, followed by the live focus-local tree in the rendered tool
-  result.
+  result. The `complete` result instead shows the affected node's ancestor path
+  and every sibling because completion may clear the focus that would otherwise
+  anchor the view.
 - `maxReadNodes`, `get_todo_stack`, and `update_todo_stack` are removed from the
   model-facing contract.
 - `rest_todos` may be omitted or empty, but the first focused item remains required, so

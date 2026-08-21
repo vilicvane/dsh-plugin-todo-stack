@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCompleteTodoTree, renderTodoStackContext } from '../lib/view.ts';
+import {
+  buildCompleteTodoTree,
+  renderTodoStackContext,
+  renderTodoStackSiblingContext,
+} from '../lib/view.ts';
 import type { TodoStackNode, TodoStackState } from '../lib/types.ts';
 
 function node(
@@ -38,7 +42,7 @@ test('runtime snapshot shows only the focus branch and leaf-level siblings', () 
     '- [ ] t1 开发 A 功能',
     '  - [ ] t3 调研 A2 特性',
     '    - [x] t4 验证接口',
-    '    - [ ] t5 验证异常路径（进行中）',
+    '    - [*] t5 验证异常路径',
     '    - [ ] t6 整理结论',
     '</todo-stack>',
   ].join('\n'));
@@ -71,6 +75,54 @@ test('complete tree view returns all nested branches without truncation', () => 
   assert.equal(tree.roots[0]?.children[1]?.children[1]?.focused, true);
 });
 
+test('a completed todo result exposes its ancestor path and every sibling', () => {
+  const state = fixture();
+  state.revision = 13;
+  state.nodes.t5.status = 'completed';
+  state.focusId = null;
+
+  assert.equal(renderTodoStackSiblingContext(state, 't5'), [
+    '<todo-stack revision="13">',
+    '- [ ] t1 开发 A 功能',
+    '  - [ ] t3 调研 A2 特性',
+    '    - [x] t4 验证接口',
+    '    - [x] t5 验证异常路径',
+    '    - [ ] t6 整理结论',
+    '</todo-stack>',
+  ].join('\n'));
+});
+
+test('a completed root result exposes terminal and pending root siblings', () => {
+  const state = fixture();
+  state.revision = 13;
+  state.roots.push('t8');
+  state.nodes.t8 = node('t8', '发布 B 功能', null, [], 'completed');
+  state.focusId = null;
+
+  assert.equal(renderTodoStackSiblingContext(state, 't8'), [
+    '<todo-stack revision="13">',
+    '- [ ] t1 开发 A 功能',
+    '- [x] t8 发布 B 功能',
+    '</todo-stack>',
+  ].join('\n'));
+});
+
+test('a completed todo result does not truncate a crowded sibling level', () => {
+  const state = fixture();
+  for (let number = 8; number <= 20; number += 1) {
+    const id = `t${number}`;
+    state.nodes[id] = node(id, `同级 ${number}`, 't3', []);
+    state.nodes.t3.children.push(id);
+  }
+  state.nodes.t5.status = 'completed';
+  state.focusId = null;
+
+  const context = renderTodoStackSiblingContext(state, 't5');
+  assert.match(context, /\[x\] t5 验证异常路径/);
+  assert.match(context, /\[ \] t20 同级 20/);
+  assert.doesNotMatch(context, /…/);
+});
+
 test('a crowded frontier keeps the current leaf inside the bounded window', () => {
   const state = fixture();
   for (let number = 8; number <= 15; number += 1) {
@@ -81,7 +133,7 @@ test('a crowded frontier keeps the current leaf inside the bounded window', () =
   state.focusId = 't12';
 
   const context = renderTodoStackContext(state, 4);
-  assert.match(context, /t12 同级 12（进行中）/);
+  assert.match(context, /\[\*\] t12 同级 12/);
   assert.match(context, /… [0-9]+ earlier/);
   assert.match(context, /… [0-9]+ more/);
 });

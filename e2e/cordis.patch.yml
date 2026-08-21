@@ -1,8 +1,4 @@
 # Overlay for the dedicated ~/.dsh/profiles/test-todo-stack profile.
-- id: todo-stack
-  config:
-    reminderIntervalNodes: 3
-
 - insert:
     - id: todo-stack-e2e-runner
       name: dsh-plugin-todo-stack/e2e-runner

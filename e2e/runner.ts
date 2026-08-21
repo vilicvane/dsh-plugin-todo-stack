@@ -165,6 +165,8 @@ async function run(ctx: any): Promise<void> {
     assert.equal(probeCalls, 1);
     assertOperations(liveHandle.agent.session, ['create'], 'create turn');
     assertVisibleTools(liveHandle.agent.session, 'live session');
+    const createdText = toolResultText(toolResultsFor(liveHandle.agent.session, 'todo_stack__create')[0]);
+    assert.match(createdText, /- \[\*\] t1 E2E root cobalt 771/);
 
     await followup(
       liveHandle.agent,
@@ -176,6 +178,17 @@ async function run(ctx: any): Promise<void> {
     assert.equal(state.nodes.t3.status, 'pending');
     assert.equal(state.focusId, 't3');
     assertOperations(liveHandle.agent.session, ['create', 'expand', 'complete', 'focus'], 'leaf workflow');
+    const completedText = toolResultText(
+      toolResultsFor(liveHandle.agent.session, 'todo_stack__complete')[0],
+    );
+    assert.match(completedText, /- \[x\] t2 E2E child gamma 194/);
+    assert.match(completedText, /- \[ \] t3 E2E sibling delta 508/);
+    assert.equal(toolResultsFor(liveHandle.agent.session, 'todo_stack__show').length, 0);
+    assert.ok(
+      contextSections(liveHandle.agent.session, 'todo-stack:turn-start').some((section: any) =>
+        /I am starting a new turn/.test(section.text)),
+      'a later focused turn must receive the turn-start reflection',
+    );
     assert.ok(
       contextSections(liveHandle.agent.session, 'todo-stack:no-focus').some((section: any) =>
         /I currently have no todo focus/.test(section.text)),
@@ -281,6 +294,7 @@ async function run(ctx: any): Promise<void> {
         arguments: event.data.arguments,
       })),
       focusContexts: contextSections(coldHandle.agent.session, 'todo-stack:focus'),
+      turnStartContexts: contextSections(coldHandle.agent.session, 'todo-stack:turn-start'),
       noFocusContexts: contextSections(coldHandle.agent.session, 'todo-stack:no-focus'),
     }, null, 2)}\n`, 'utf8');
 

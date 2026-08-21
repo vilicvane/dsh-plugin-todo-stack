@@ -92,13 +92,18 @@ stack only for an immediate non-substantive answer.
 
 At turn start, the agent receives a focus-local tree view. Ancestors show only
 the active branch. At the frontier, a branch focus exposes its direct children;
-a leaf focus exposes its siblings. Only the focused leaf carries the
-`（进行中）` annotation. The view is bounded but always retains the focus path.
+a leaf focus exposes its siblings. Pending nodes use `[ ]`, the focused leaf
+uses `[*]`, and completed nodes use `[x]`. The view is bounded but always
+retains the focus path.
 
 That injected view remains frozen until the first Todo Stack mutation in the
 turn and then clears. Each mutation result carries the current live branch, so
 Todo Stack calls do not continually append fresh dynamic context snapshots.
-The complete tree is loaded explicitly with `todo_stack__show`.
+The complete tree is loaded explicitly with `todo_stack__show`. Completing a
+todo is the exception to the ordinary focus-local mutation result: because
+completion may clear focus, its result shows the affected node's ancestor path
+and every sibling, including the completed node, so the agent can choose the
+next focus without an intermediate `show` call.
 
 The `create` result also carries one short first-person granularity check. It
 asks the agent to expand before another tool only when the new root contains at
@@ -107,19 +112,25 @@ arguments, and final-answer requirements from becoming child todos. Limiting
 this reflection to `create` avoids over-decomposing an already precise leaf
 selected later with `focus`.
 
-Two dynamic reflections reinforce the contract:
+Two dynamic reflections reinforce the contract without competing inside a
+long turn:
 
-1. At every configured open-turn node milestone, a one-request first-person
-   reflection asks whether the tree still matches the work, whether current
-   focus should be decomposed, and whether later work should be recorded.
+1. At the first model request of each later turn with a focus, a one-request
+   first-person reflection asks whether the focus still matches the next
+   concrete work, whether the active branch should deepen, and whether newly
+   identified later work should be recorded. The reflection is never injected
+   after work has already begun in that turn.
 2. Whenever focus is null, a first-person guard follows each eligible
    model-visible node. It asks the agent to choose a pending leaf or create new
    work before continuing, while allowing no focus during a final wrap-up.
 
-The no-focus marker includes the latest eligible surface sequence, so ignoring
-one reminder does not suppress later reminders. Runtime system-prompt snapshots
-are excluded from milestone counts and no-focus trigger selection, preventing
-self-recursion. Opening guidance suppresses the redundant first no-focus guard.
+The turn-start reflection is recorded once in that turn's runtime-context
+snapshot. The no-focus marker includes the latest eligible surface sequence,
+so ignoring one reminder does not suppress later reminders. Runtime
+system-prompt snapshots are excluded from no-focus trigger selection,
+preventing self-recursion. Opening guidance suppresses the redundant first
+no-focus guard, and null focus suppresses the less specific turn-start
+reflection.
 
 Maintenance pressure is intentionally asymmetric. The agent proactively keeps
 its current branch and remembered later work synchronized, but does not polish

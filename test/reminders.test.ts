@@ -3,10 +3,9 @@ import { describe, test } from 'node:test';
 
 import {
   buildNoFocusGuardContext,
-  TODO_STACK_REMINDER_CONTEXT_NAME,
-  buildTodoStackReminderContext,
-  countOpenTurnNodes,
-  latestAnnouncedNodeMilestone,
+  TODO_STACK_TURN_START_CONTEXT_NAME,
+  buildTurnStartReflectionContext,
+  turnStartReflectionWasShown,
 } from '../lib/reminders.ts';
 import type { TodoStackState } from '../lib/types.ts';
 
@@ -40,62 +39,79 @@ function assistant(text: string, turn = 1, step = 1): any {
 }
 
 describe('todo stack dynamic reminders', () => {
-  test('tool results do not trigger dynamic system-prompt reminders', () => {
+  test('reflects once at the start of each non-opening focused turn', () => {
+    const session = fixtureSession();
+    session.append('turn/start', { turn: 1 });
+    session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+    session.append('turn/start', { turn: 2 });
+    session.append('user/message', message('continue'), 'append');
+    const state: TodoStackState = {
+      version: 1,
+      revision: 1,
+      roots: ['t1'],
+      nodes: {
+        t1: {
+          id: 't1',
+          content: 'Focused work',
+          parentId: null,
+          children: [],
+          status: 'pending',
+        },
+      },
+      focusId: 't1',
+    };
+
+    const first = buildTurnStartReflectionContext({ session, state, opening: false });
+    assert.match(first, /todo-stack-turn-start turn="2"/);
+    assert.match(first, /I am starting a new turn/);
+    assert.match(first, /Does the current focus still match/);
+    assert.match(first, /Am I diving deeper/);
+    assert.match(first, /Did I identify something to handle later/);
+    assert.doesNotMatch(first, /todo_stack__/);
+
+    session.append('user/message', message(first, {
+      kind: 'plugin',
+      plugin: '@deepseek-ai/dsh-system-prompt',
+      form: 'snapshot',
+      sections: [{ name: TODO_STACK_TURN_START_CONTEXT_NAME, text: first }],
+    }), 'append');
+    assert.equal(turnStartReflectionWasShown(session, 2), true);
+    assert.equal(buildTurnStartReflectionContext({ session, state, opening: false }), '');
+
+    session.append('turn/end', { turn: 2, reason: { kind: 'completed' } });
+    session.append('turn/start', { turn: 3 });
+    session.append('user/message', message('next'), 'append');
+    assert.match(
+      buildTurnStartReflectionContext({ session, state, opening: false }),
+      /todo-stack-turn-start turn="3"/,
+    );
+  });
+
+  test('does not introduce a turn-start reflection after work begins or without focus', () => {
     const session = fixtureSession();
     session.append('turn/start', { turn: 1 });
     session.append('user/message', message('work'), 'append');
-    session.append('assistant/message', assistant('update stack'), 'append');
-    session.append('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'example_tool', arguments: '{}' });
-    session.append('tool/result', {
-      turn: 1,
-      step: 1,
-      message: {
-        id: 'r1',
-        role: 'user',
-        source: { kind: 'tool', callId: 'c1' },
-        content: [{ type: 'tool-result', toolCallId: 'c1', content: [{ type: 'text', text: 'updated' }] }],
+    const state: TodoStackState = {
+      version: 1,
+      revision: 1,
+      roots: ['t1'],
+      nodes: {
+        t1: {
+          id: 't1',
+          content: 'Focused work',
+          parentId: null,
+          children: [],
+          status: 'pending',
+        },
       },
-    }, 'append');
-
-    assert.equal(buildTodoStackReminderContext({
-      session,
-      reminderIntervalNodes: 30,
-    }), '');
-  });
-
-  test('announces each node milestone once and excludes runtime snapshots from the count', () => {
-    const session = fixtureSession();
-    session.append('turn/start', { turn: 1 });
-    session.append('user/message', message('one'), 'append');
-    session.append('assistant/message', assistant('two'), 'append');
-    session.append('user/message', message('runtime', {
-      kind: 'plugin',
-      plugin: '@deepseek-ai/dsh-system-prompt',
-      form: 'snapshot',
-      sections: [],
-    }), 'append');
-    assert.equal(countOpenTurnNodes(session, 1), 2);
-
-    const reminder = buildTodoStackReminderContext({
-      session,
-      reminderIntervalNodes: 2,
-    });
-    assert.match(reminder, /milestone-nodes="2"/);
-    assert.match(reminder, /I need to reflect now on whether I am still synchronized/);
-    assert.match(reminder, /Am I diving deeper/);
-    assert.match(reminder, /Did I remember something to handle later/);
-    assert.doesNotMatch(reminder, /todo_stack__/);
-    session.append('user/message', message(reminder, {
-      kind: 'plugin',
-      plugin: '@deepseek-ai/dsh-system-prompt',
-      form: 'snapshot',
-      sections: [{ name: TODO_STACK_REMINDER_CONTEXT_NAME, text: reminder }],
-    }), 'append');
-    assert.equal(latestAnnouncedNodeMilestone(session, 1), 2);
-    assert.equal(buildTodoStackReminderContext({
-      session,
-      reminderIntervalNodes: 2,
-    }), '');
+      focusId: 't1',
+    };
+    assert.equal(buildTurnStartReflectionContext({ session, state, opening: true }), '');
+    state.focusId = null;
+    assert.equal(buildTurnStartReflectionContext({ session, state, opening: false }), '');
+    state.focusId = 't1';
+    session.append('assistant/message', assistant('already working'), 'append');
+    assert.equal(buildTurnStartReflectionContext({ session, state, opening: false }), '');
   });
 
   test('no-focus guard follows each eligible node and ignores its own snapshots', () => {

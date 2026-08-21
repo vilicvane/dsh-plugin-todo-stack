@@ -519,7 +519,11 @@ async function run(ctx: any): Promise<void> {
     throw new Error(`TODO_STACK_PROMPT_EVAL_SCENARIOS must contain only: ${SCENARIOS.join(', ')}`);
   }
   const scenarios = [...new Set(requestedScenarios)] as Scenario[];
-  const selection = defaultModel.currentSelection();
+  const savedSelection = defaultModel.currentSelection();
+  const selection = {
+    provider: process.env.TODO_STACK_PROMPT_EVAL_PROVIDER ?? savedSelection.provider,
+    model: process.env.TODO_STACK_PROMPT_EVAL_MODEL ?? savedSelection.model,
+  };
   const results: RunResult[] = [];
   for (let repetition = 1; repetition <= repetitions; repetition += 1) {
     for (const scenario of scenarios) {

@@ -5,6 +5,8 @@ project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dsh_home="${DSH_HOME:-$HOME/.dsh}"
 profile_dir="$dsh_home/profiles/test-todo-stack"
 dsh_bin="${DSH_E2E_BIN:-$dsh_home/runtime/node_modules/.bin/dsh}"
+prompt_eval_provider="${TODO_STACK_PROMPT_EVAL_PROVIDER:-deepseek-official}"
+prompt_eval_model="${TODO_STACK_PROMPT_EVAL_MODEL:-deepseek-v4-flash}"
 
 if [[ ! -x "$dsh_bin" ]]; then
   echo "DSH runtime is missing: $dsh_bin" >&2
@@ -34,6 +36,8 @@ trap cleanup EXIT
 set +e
 DSH_TOOLS_MODE=native \
 TODO_STACK_PROMPT_EVAL_ARTIFACT_DIR="$project_dir/.tmp" \
+TODO_STACK_PROMPT_EVAL_PROVIDER="$prompt_eval_provider" \
+TODO_STACK_PROMPT_EVAL_MODEL="$prompt_eval_model" \
 timeout "${TODO_STACK_PROMPT_EVAL_TIMEOUT_SECONDS:-1200}s" "$dsh_bin" \
   --profile test-todo-stack \
   --patch "$project_dir/e2e/prompt-eval.patch.yml" \

@@ -12,9 +12,9 @@ import { foldTodoStack } from './lib/state.ts';
 import { createTodoStackTools } from './lib/tools.ts';
 import {
   TODO_STACK_NO_FOCUS_CONTEXT_NAME,
-  TODO_STACK_REMINDER_CONTEXT_NAME,
+  TODO_STACK_TURN_START_CONTEXT_NAME,
   buildNoFocusGuardContext,
-  buildTodoStackReminderContext,
+  buildTurnStartReflectionContext,
 } from './lib/reminders.ts';
 import { renderTodoStackContext } from './lib/view.ts';
 import type { TodoStackState } from './lib/types.ts';
@@ -24,7 +24,6 @@ const inject = ['tools', 'systemPrompt'];
 
 const DEFAULT_MAX_NODES = 200;
 const DEFAULT_CONTEXT_CHILDREN = 8;
-const DEFAULT_REMINDER_INTERVAL_NODES = 30;
 
 const TODO_STACK_GUIDANCE = [
   '## My todo stack',
@@ -57,8 +56,6 @@ export interface Config {
   contextChildren?: number;
   /** Publish the flattened `todos` projection consumed by the stock TodoDock. */
   todoDock?: boolean;
-  /** Open-turn surface-node interval for optional maintenance reminders. */
-  reminderIntervalNodes?: number;
 }
 
 function positiveInteger(value: number | undefined, fallback: number, name: string): number {
@@ -102,11 +99,6 @@ function apply(ctx: Context, config: Config = {}): void {
     'contextChildren',
   );
   const todoDock = config.todoDock !== false;
-  const reminderIntervalNodes = positiveInteger(
-    config.reminderIntervalNodes,
-    DEFAULT_REMINDER_INTERVAL_NODES,
-    'reminderIntervalNodes',
-  );
 
   ctx.inject(['sessionProjections'], (projectionCtx) => {
     projectionCtx.sessionProjections.register(todoStackProjection());
@@ -146,14 +138,16 @@ function apply(ctx: Context, config: Config = {}): void {
   });
 
   ctx.systemPrompt.context({
-    name: TODO_STACK_REMINDER_CONTEXT_NAME,
+    name: TODO_STACK_TURN_START_CONTEXT_NAME,
     order: 152,
     text: (assembly: AssembleContext) => {
       const agent: Agent | undefined = assembly.agent;
       if (agent === undefined) return '';
-      return buildTodoStackReminderContext({
+      const state = stateFor(ctx, agent.session);
+      return buildTurnStartReflectionContext({
         session: agent.session,
-        reminderIntervalNodes,
+        state,
+        opening: isSessionOpening(agent.session, state),
       });
     },
   });

@@ -60,6 +60,11 @@ test('plugin registers namespaced tools, projections, and first-person prompts',
   assert.deepEqual(captured.projections.map((item) => item.key), ['todoStack', 'todos']);
   assert.equal(captured.sections.length, 2);
   assert.equal(captured.contexts.length, 3);
+  assert.deepEqual(captured.contexts.map((item) => item.name), [
+    'todo-stack:focus',
+    'todo-stack:turn-start',
+    'todo-stack:no-focus',
+  ]);
 
   const guidance = captured.sections.find((item) => item.name === 'todo-stack:guidance').text;
   assert.match(guidance, /I maintain a persistent todo tree/);
@@ -78,6 +83,28 @@ test('plugin registers namespaced tools, projections, and first-person prompts',
   openingSession.append('turn/start', { turn: 1 });
   openingSession.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
   assert.equal(initial.text({ agent: { session: openingSession } }), '');
+
+  const focusedSession = Session.create(SessionId('session-turn-start-guidance'));
+  focusedSession.append('todo/write', makeTodoStackCarrier('create', {
+    version: 1,
+    revision: 1,
+    roots: ['t1'],
+    nodes: {
+      t1: {
+        id: 't1',
+        content: 'Continue implementation',
+        parentId: null,
+        children: [],
+        status: 'pending',
+      },
+    },
+    focusId: 't1',
+  }));
+  focusedSession.append('turn/start', { turn: 1 });
+  const turnStart = captured.contexts.find((item) => item.name === 'todo-stack:turn-start');
+  const turnStartText = turnStart.text({ agent: { session: focusedSession } });
+  assert.match(turnStartText, /I am starting a new turn/);
+  assert.match(turnStartText, /Does the current focus still match/);
 });
 
 test('namespaced tools create, expand, show, complete, and refocus a real Session', async () => {
@@ -119,7 +146,10 @@ test('namespaced tools create, expand, show, complete, and refocus a real Sessio
   const completed = await complete.execute({ id: 't3' }, exec);
   assert.equal(completed.revision, 3);
   assert.equal(completed.focusId, null);
-  assert.doesNotMatch(complete.output.render({}, completed)[0].text, /two or more independent outcomes/);
+  const completedText = complete.output.render({}, completed)[0].text;
+  assert.match(completedText, /- \[x\] t3 Implement API/);
+  assert.match(completedText, /- \[ \] t4 Implement UI/);
+  assert.doesNotMatch(completedText, /two or more independent outcomes/);
   const refocused = await focus.execute({ id: 't4' }, exec);
   assert.equal(refocused.revision, 4);
   assert.equal(refocused.focusId, 't4');

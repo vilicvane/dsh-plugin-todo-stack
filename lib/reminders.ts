@@ -1,8 +1,8 @@
 import { deriveEventMessage } from '@deepseek-ai/dsh-session';
 import type { TodoStackState } from './types.ts';
 
-export const TODO_STACK_REMINDER_CONTEXT_NAME = 'todo-stack:reminder';
 export const TODO_STACK_NO_FOCUS_CONTEXT_NAME = 'todo-stack:no-focus';
+export const TODO_STACK_TURN_START_CONTEXT_NAME = 'todo-stack:turn-start';
 
 const SYSTEM_PROMPT_PLUGIN = '@deepseek-ai/dsh-system-prompt';
 
@@ -26,19 +26,6 @@ function isRuntimeContextSnapshot(event: any): boolean {
   return event?.type === 'user/message'
     && event.data?.source?.kind === 'plugin'
     && event.data.source.plugin === SYSTEM_PROMPT_PLUGIN;
-}
-
-function effectiveOpenTurnEvents(session: any, turn: number): any[] {
-  const start = turnStartSeq(session, turn);
-  if (start === undefined) throw new Error(`todo-stack reminder: open turn ${turn} has no matching turn/start`);
-  const events: any[] = [];
-  for (const seq of session.surface.nodes as number[]) {
-    if (seq <= start) continue;
-    const event = session.events[seq];
-    if (event?.surfaceOp !== 'append' || isRuntimeContextSnapshot(event)) continue;
-    if (deriveEventMessage(event) !== null) events.push(event);
-  }
-  return events;
 }
 
 export function latestEligibleSurfaceSeq(session: any): number | undefined {
@@ -66,25 +53,9 @@ export function buildNoFocusGuardContext(options: {
   ].join('\n');
 }
 
-export function countOpenTurnNodes(session: any, turn: number): number {
-  return effectiveOpenTurnEvents(session, turn).length;
-}
-
-export function nodeMilestone(openTurnNodes: number, reminderIntervalNodes: number): number {
-  return Math.floor(openTurnNodes / reminderIntervalNodes) * reminderIntervalNodes;
-}
-
-function numericMarkerAttribute(text: string, name: string): number | undefined {
-  const match = new RegExp(`\\b${name}="(\\d+)"`).exec(text);
-  if (match === null) return undefined;
-  const value = Number(match[1]);
-  return Number.isSafeInteger(value) ? value : undefined;
-}
-
-export function latestAnnouncedNodeMilestone(session: any, turn: number): number {
+export function turnStartReflectionWasShown(session: any, turn: number): boolean {
   const start = turnStartSeq(session, turn);
-  if (start === undefined) return 0;
-  let latest = 0;
+  if (start === undefined) return false;
   for (const event of session.events as any[]) {
     if (event?.seq <= start
       || event?.type !== 'user/message'
@@ -92,43 +63,39 @@ export function latestAnnouncedNodeMilestone(session: any, turn: number): number
       || event.data.source.plugin !== SYSTEM_PROMPT_PLUGIN
       || !Array.isArray(event.data.source.sections)) continue;
     for (const section of event.data.source.sections) {
-      if (section?.name !== TODO_STACK_REMINDER_CONTEXT_NAME || typeof section.text !== 'string') continue;
-      if (numericMarkerAttribute(section.text, 'turn') !== turn) continue;
-      const milestone = numericMarkerAttribute(section.text, 'milestone-nodes');
-      if (milestone !== undefined) latest = Math.max(latest, milestone);
+      if (section?.name === TODO_STACK_TURN_START_CONTEXT_NAME) return true;
     }
   }
-  return latest;
+  return false;
 }
 
-export function buildTodoStackReminderContext(options: {
-  session: any;
-  reminderIntervalNodes: number;
-}): string {
-  const turn = openTurnNumber(options.session);
-  if (turn === null) return '';
-  const events = effectiveOpenTurnEvents(options.session, turn);
-  const openTurnNodes = events.length;
-  const milestoneNodes = nodeMilestone(openTurnNodes, options.reminderIntervalNodes);
-  const announceMilestone = milestoneNodes > latestAnnouncedNodeMilestone(options.session, turn)
-    ? milestoneNodes
-    : 0;
-  if (announceMilestone === 0) return '';
+function turnHasStartedWorking(session: any, turn: number): boolean {
+  const start = turnStartSeq(session, turn);
+  if (start === undefined) return false;
+  return session.events.some((event: any) => event?.seq > start && (
+    event.type === 'assistant/message'
+    || event.type === 'tool/result'
+    || event.type === 'todo/write'
+  ));
+}
 
-  const attributes = [
-    `turn="${turn}"`,
-    `open-turn-nodes="${openTurnNodes}"`,
-    `milestone-nodes="${announceMilestone}"`,
-  ];
-  const lines = [`<todo-stack-reminder ${attributes.join(' ')}>`];
-  lines.push(
-    `This turn has crossed ${announceMilestone} nodes. I need to reflect now on whether I am still synchronized with the todo stack:`,
-  );
-  lines.push(
-    '- Am I diving deeper? I should break down the current focus and move focus to the next concrete step.',
-    '- Did I remember something to handle later? I should add it below the relevant task without losing my current focus.',
-    '- In any case, I need to keep the stack up to date. Otherwise I could lose focus during turn and session compaction, and the user would lose visibility into the structure of my plan.',
-    '</todo-stack-reminder>',
-  );
-  return lines.join('\n');
+export function buildTurnStartReflectionContext(options: {
+  session: any;
+  state: TodoStackState;
+  opening: boolean;
+}): string {
+  if (options.opening || options.state.focusId === null) return '';
+  const turn = openTurnNumber(options.session);
+  if (turn === null
+    || turnStartReflectionWasShown(options.session, turn)
+    || turnHasStartedWorking(options.session, turn)) return '';
+  return [
+    `<todo-stack-turn-start turn="${turn}">`,
+    'I am starting a new turn, so I need to reflect on whether I am still synchronized with the todo stack:',
+    '- Does the current focus still match the next concrete work?',
+    '- Am I diving deeper? I should break down the focus when that would make the work structure clearer.',
+    '- Did I identify something to handle later? I should add it below the relevant todo without losing my current focus.',
+    '- If the stack already reflects the work accurately, I can continue without changing it.',
+    '</todo-stack-turn-start>',
+  ].join('\n');
 }

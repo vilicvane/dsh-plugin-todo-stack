@@ -56,10 +56,11 @@ After `create`, the tool result carries one short first-person check that asks
 for another expansion only when the new root still contains two or more
 independent outcomes.
 
-Immediate answers that require no substantive work do not need a stack. At 30,
-60, 90, ... model-visible nodes in one open turn, a transient first-person
-reflection asks whether the current work and tree have drifted. Runtime prompt
-snapshots are excluded from this count.
+Immediate answers that require no substantive work do not need a stack. At the
+start of each later turn, a one-request first-person reflection asks whether
+the current focus still matches the next concrete work, whether the active
+branch should deepen, and whether newly identified later work belongs in the
+tree. If focus is absent, the more specific no-focus guard appears instead.
 
 ## DSH integration
 
@@ -70,15 +71,18 @@ The plugin registers:
 - a Web `TodoStackDock` that renders hierarchy, focus, and lifecycle;
 - a flattened `todos` compatibility projection for clients without the custom
   dock;
-- turn-start context containing only the focused branch and its working level;
-- the live updated branch in every mutation result, plus the bounded
-  post-`create` focus-granularity check; and
-- dynamic node-milestone and no-focus reminders.
+- turn-start context containing the focused branch and one brief
+  synchronization reflection;
+- the live updated branch in every mutation result, with `complete` showing
+  the affected node and all of its siblings, plus the bounded post-`create`
+  focus-granularity check; and
+- the dynamic no-focus guard.
 
 The turn-start branch stays frozen until the first Todo Stack mutation in that
 turn. Mutation results carry the live branch, avoiding a new system context
-snapshot after every Todo Stack call. `todo_stack__show` loads the full tree
-only when the agent needs it.
+snapshot after every Todo Stack call. A focused node uses the compact `[*]`
+marker; pending and completed nodes use `[ ]` and `[x]`. `todo_stack__show`
+loads the full tree only when the agent needs it.
 
 The plugin does not depend on or load `@deepseek-ai/dsh-tool-todo`. Keep the
 stock `tool-todo` loader entry disabled so it cannot register a competing
@@ -103,7 +107,6 @@ Add the plugin to the profile patch:
         maxNodes: 200
         contextChildren: 8
         todoDock: true
-        reminderIntervalNodes: 30
 ```
 
 Restart the DSH profile after installation or patch changes.
@@ -147,6 +150,10 @@ TODO_STACK_PROMPT_EVAL_SCENARIOS=recover_focus \
 pnpm e2e:prompt
 ```
 
+Prompt evaluation uses `deepseek-official/deepseek-v4-flash` by default so it
+does not contend with local GPU workloads. Set `TODO_STACK_PROMPT_EVAL_PROVIDER`
+and `TODO_STACK_PROMPT_EVAL_MODEL` when evaluating a specific model instead.
+
 ## Configuration
 
 | Setting | Default | Meaning |
@@ -154,7 +161,6 @@ pnpm e2e:prompt
 | `maxNodes` | `200` | Maximum retained nodes in one session tree. |
 | `contextChildren` | `8` | Immediate siblings or children included at the working frontier. |
 | `todoDock` | `true` | Publish the flattened `todos` compatibility projection. The custom Web dock reads `todoStack` directly. |
-| `reminderIntervalNodes` | `30` | Open-turn model-visible node interval for tree synchronization reminders. |
 
 See [design.md](./design.md) for state, persistence, and prompt semantics and
 [tool-redesign.md](./tool-redesign.md) for the decisions behind this tool

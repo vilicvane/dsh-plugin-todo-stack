@@ -12,6 +12,7 @@ import type { TodoStackMutation } from './state.ts';
 import {
   buildCompleteTodoTree,
   renderTodoStackContext,
+  renderTodoStackSiblingContext,
 } from './view.ts';
 import type { TodoStackOperation, TodoStackState } from './types.ts';
 
@@ -59,11 +60,14 @@ function stateFor(ctx: RuntimeContext, session: SessionLike): TodoStackState {
 function mutationResult(
   state: TodoStackState,
   operation: TodoStackOperation,
+  affectedNodeId: string | null,
   affectedId: string | null,
   createdIds: string[],
   contextChildren: number,
 ): JsonValue {
-  const branch = renderTodoStackContext(state, contextChildren);
+  const branch = operation === 'complete' && affectedNodeId !== null
+    ? renderTodoStackSiblingContext(state, affectedNodeId)
+    : renderTodoStackContext(state, contextChildren);
   const focusReflection = operation === 'create' && state.focusId !== null
     ? 'I need to check this new root before using another tool: only if it contains two or more independent outcomes should I expand it first. A single tool call, its arguments, or a final-answer requirement is not a child todo.'
     : '';
@@ -96,6 +100,7 @@ function executeMutation(
   return mutationResult(
     result.state,
     mutation.action,
+    result.affectedId,
     affectedId,
     result.createdIds.map((id) => todoNodeRef(result.state, id)),
     settings.contextChildren,
