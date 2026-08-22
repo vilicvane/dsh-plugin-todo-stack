@@ -63,7 +63,9 @@ describe('todo stack dynamic reminders', () => {
 
     const first = buildTurnStartReflectionContext({ session, state, opening: false });
     assert.match(first, /Todo Stack check required — turn 2/);
-    assert.match(first, /Before calling another non-Todo tool/);
+    assert.match(first, /before the next work or final response/);
+    assert.match(first, /\[\*\] means focused and still pending/);
+    assert.match(first, /call todo_stack__complete before giving the final response/);
     assert.match(first, /Confirm that the focused leaf matches/);
     assert.match(first, /todo_stack__expand/);
     assert.match(first, /Record established later work/);

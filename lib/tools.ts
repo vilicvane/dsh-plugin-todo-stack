@@ -70,7 +70,7 @@ function mutationResult(
     ? [
       'Review the new focused root before using another tool. If its text includes checks or a sequence (for example, "inspect A and B, then report"), call todo_stack__edit first so the root names only their shared outcome (for example, "Assess release readiness").',
       'Then call todo_stack__expand only when the root contains two or more independent child outcomes. Do not make a single tool call, its arguments, evidence/reporting, or a final-answer requirement into a child todo.',
-      'After that tool, synchronize the focus with the result: complete verified work; if it is blocked, keep it pending and call todo_stack__edit so it names the actual objective plus dependency (for example, "Deploy after credentials are provided").',
+      'After that tool, synchronize the focus with the result before the final response: complete verified work; if it is blocked, keep it pending and call todo_stack__edit so it names the actual objective plus dependency (for example, "Deploy after credentials are provided").',
     ].join('\n')
     : '';
   return {
@@ -199,7 +199,7 @@ export function createTodoStackTools(ctx: RuntimeContext, settings: TodoStackRun
 
   const complete = defineTool({
     name: 'todo_stack__complete',
-    description: 'Mark an identified pending todo complete after its outcome is verified. A todo with pending descendants cannot complete. Completing the focused leaf clears focus; if substantive work remains, choose a new meaningful leaf before continuing.',
+    description: 'Mark an identified pending todo complete after its outcome is verified. Call this before the final response rather than leaving completed work pending. A todo with pending descendants cannot complete. Completing the focused leaf clears focus; if substantive work remains, choose a new meaningful leaf before continuing.',
     parameters: {
       id: { type: 'string', required: true, description: 'Id of the verified todo to complete.' },
     },

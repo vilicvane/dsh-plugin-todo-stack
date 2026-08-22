@@ -87,14 +87,19 @@ semantics.
 The static prompt is a direct working contract. It explains why the tree
 exists, keeps node contents brief, requires a meaningful leaf focus during
 substantive work, and names the Todo Stack action that restores each state.
-The opening runtime context adds a concrete deep-tree example and permits
-skipping the stack only for an immediate non-substantive answer.
+It also makes final-response reconciliation explicit: verified focus is
+completed, while blocked or unfinished focus stays pending and accurate. A
+direct answer may skip creating a stack only when no tracked pending task
+already exists. The opening runtime context adds a concrete deep-tree example
+and permits skipping initialization only for an immediate non-substantive
+answer.
 
 At turn start, the agent receives a focus-local tree view. Ancestors show only
 the active branch. At the frontier, a branch focus exposes its direct children;
-a leaf focus exposes its siblings. Pending nodes use `[ ]`, the focused leaf
-uses `[*]`, and completed nodes use `[x]`. The view is bounded but always
-retains the focus path.
+a leaf focus exposes its siblings. Pending nodes use `[ ]`, the focused pending
+leaf uses `[*]`, and completed nodes use `[x]`. Every model-facing tree includes
+that marker legend because `[*]` can otherwise be mistaken for completion. The
+view is bounded but always retains the focus path.
 
 That injected view remains frozen until the first Todo Stack mutation in the
 turn and then clears. Each mutation result carries the current live branch, so
@@ -119,7 +124,8 @@ Two dynamic reflections reinforce the contract without competing inside a
 long turn:
 
 1. At the first model request of each later turn with a focus, a one-request
-   directive requires checking whether the focus still matches the next
+   directive requires completing an already verified focus before a final
+   response, then otherwise checking whether the focus still matches the next
    concrete work, whether the active branch should deepen, and whether newly
    identified later work should be recorded. It is never injected after work
    has already begun in that turn.

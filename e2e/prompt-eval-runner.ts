@@ -31,6 +31,8 @@ const MUTATION_TOOLS: ReadonlySet<string> = new Set(
 );
 const SCENARIOS = [
   'tracked_release',
+  'single_verified_outcome',
+  'continuation_wrapup',
   'trivial_direct',
   'blocked_release',
   'existing_focus',
@@ -66,6 +68,8 @@ interface ScenarioRuntime {
 
 const scenarioPrompt: Record<Scenario, string> = {
   tracked_release: `Assess whether release cobalt is ready. Inspect the api and storage areas separately with ${PROBE_TOOL}, then use its verify area to validate the combined decision. Report a concise conclusion containing every returned COBALT evidence code. Carry out the checks yourself rather than asking me to do them.`,
+  single_verified_outcome: `Find the current cobalt API release status. Inspect api exactly once with ${PROBE_TOOL}, then tell me the result and include its COBALT evidence code.`,
+  continuation_wrapup: 'Turn Memory automatic continuation after a compressed turn\nThis is host control context, not new human input.\nResume from the prior handoff: the focused cobalt API status investigation is already verified. COBALT-API-2: two API smoke suites passed; no open compatibility blocker. Do not repeat the inspection. Give the user the final conclusion now.',
   trivial_direct: 'Reply with exactly COBALT-PONG and nothing else. This is a direct answer: do not use any tool.',
   blocked_release: `Assess whether blocked release cobalt can proceed by calling ${PROBE_TOOL} once with area blocked. If it reports missing external input, stop without retrying or inventing the input, retain a meaningful record of the blocked work, and ask me for what is needed. Include the returned COBALT evidence code.`,
   existing_focus: `Within the currently focused release task, assess cobalt readiness as one distinct piece of work. Inspect api and storage separately with ${PROBE_TOOL}, then use its verify area. Finish only the readiness work, leave the broader release task pending, and report every returned COBALT evidence code.`,
@@ -217,6 +221,68 @@ function evaluateTrivial(
       `operations=${JSON.stringify(operations)}, revision=${state.revision}, nodes=${Object.keys(state.nodes).length}`,
     ),
     exact_answer: check(finalText.trim() === 'COBALT-PONG', `final=${JSON.stringify(finalText)}`),
+  };
+}
+
+function evaluateSingleVerifiedOutcome(
+  calls: ReturnType<typeof toolCalls>,
+  operations: ReturnType<typeof todoOperations>,
+  state: ReturnType<typeof foldTodoStack>,
+  finalText: string,
+  inspected: readonly string[],
+): Record<string, CheckResult> {
+  const mutations = mutationCalls(calls);
+  const firstProbeSeq = calls.find((call) => call.name === PROBE_TOOL)?.seq
+    ?? Number.POSITIVE_INFINITY;
+  const completeSeq = calls.findLast((call) => call.name === 'todo_stack__complete')?.seq
+    ?? Number.NEGATIVE_INFINITY;
+  const nodes = Object.values(state.nodes);
+  return {
+    create_before_work: check(
+      mutations.at(0)?.name === 'todo_stack__create'
+        && (mutations.at(0)?.seq ?? Infinity) < firstProbeSeq
+        && operations.at(0)?.action === 'create',
+      `first mutation=${JSON.stringify(mutations.at(0))}, first probe seq=${firstProbeSeq}, operations=${JSON.stringify(operations)}`,
+    ),
+    one_api_probe: check(
+      inspected.length === 1 && inspected[0] === 'api',
+      `observed=${JSON.stringify(inspected)}`,
+    ),
+    complete_before_final: check(
+      completeSeq > firstProbeSeq
+        && state.focusId === null
+        && nodes.length > 0
+        && nodes.every((node) => node.status === 'completed'),
+      `probe seq=${firstProbeSeq}, complete seq=${completeSeq}, focus=${state.focusId ?? 'null'}, statuses=${JSON.stringify(nodes.map((node) => node.status))}`,
+    ),
+    final_evidence: check(finalText.includes('COBALT-API-2'), `final=${JSON.stringify(finalText)}`),
+  };
+}
+
+function evaluateContinuationWrapup(
+  calls: ReturnType<typeof toolCalls>,
+  operations: ReturnType<typeof todoOperations>,
+  state: ReturnType<typeof foldTodoStack>,
+  finalText: string,
+  inspected: readonly string[],
+  seededOperationCount: number,
+): Record<string, CheckResult> {
+  const modelMutations = mutationCalls(calls);
+  const modelOperations = operations.slice(seededOperationCount);
+  return {
+    no_repeated_probe: check(
+      inspected.length === 0 && !calls.some((call) => call.name === PROBE_TOOL),
+      `observed=${JSON.stringify(inspected)}, calls=${JSON.stringify(calls)}`,
+    ),
+    complete_before_wrapup: check(
+      modelMutations.at(0)?.name === 'todo_stack__complete'
+        && modelMutations.at(0)?.arguments?.id === 't1'
+        && modelOperations.at(0)?.action === 'complete'
+        && state.nodes.t1?.status === 'completed'
+        && state.focusId === null,
+      `mutations=${JSON.stringify(modelMutations)}, operations=${JSON.stringify(modelOperations)}, state=${JSON.stringify(state)}`,
+    ),
+    final_evidence: check(finalText.includes('COBALT-API-2'), `final=${JSON.stringify(finalText)}`),
   };
 }
 
@@ -409,6 +475,17 @@ function evaluate(
   let checks: Record<string, CheckResult>;
   if (scenario === 'tracked_release') {
     checks = evaluateTracked(calls, operations, state, finalText, runtime.inspected);
+  } else if (scenario === 'single_verified_outcome') {
+    checks = evaluateSingleVerifiedOutcome(calls, operations, state, finalText, runtime.inspected);
+  } else if (scenario === 'continuation_wrapup') {
+    checks = evaluateContinuationWrapup(
+      calls,
+      operations,
+      state,
+      finalText,
+      runtime.inspected,
+      runtime.seededOperationCount,
+    );
   } else if (scenario === 'trivial_direct') {
     checks = evaluateTrivial(calls, operations, state, finalText);
   } else if (scenario === 'blocked_release') {
@@ -453,7 +530,14 @@ function wilson95(successes: number, total: number): { low: number; high: number
 }
 
 function seedScenario(session: any, scenario: Scenario, runtime: ScenarioRuntime): void {
-  if (scenario === 'existing_focus') {
+  if (scenario === 'continuation_wrapup') {
+    const state = mutateTodoStack(emptyTodoStack(), {
+      action: 'create',
+      todos: ['Determine cobalt API release status'],
+    }, { maxNodes: 200 }).state;
+    session.append('todo/write', makeTodoStackCarrier('create', state));
+    runtime.seededOperationCount = 1;
+  } else if (scenario === 'existing_focus') {
     const state = mutateTodoStack(emptyTodoStack(), {
       action: 'create',
       todos: ['Deliver cobalt release'],
@@ -543,7 +627,9 @@ async function runOne(
       id: randomUUID(),
       role: 'user',
       content: [{ type: 'text', text: scenarioPrompt[scenario] }],
-      source: { kind: 'user' },
+      source: scenario === 'continuation_wrapup'
+        ? { kind: 'plugin', plugin: 'turn-memory', phase: 'pending', turn: 2 }
+        : { kind: 'user' },
     });
     await handle.agent.whenIdle();
     const result = evaluate(scenario, handle.agent.session, runtime, repetition, Date.now() - started);

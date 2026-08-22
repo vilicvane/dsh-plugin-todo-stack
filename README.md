@@ -57,13 +57,16 @@ root that accidentally includes its checks, expand it when it contains multiple
 child outcomes, then complete verified work or keep a blocked objective pending
 as objective plus dependency.
 
-Immediate answers that require no substantive work do not need a stack. At the
-start of each later turn, a one-request instruction requires checking whether
-the current focus still matches the next concrete work, whether the active
-branch should deepen, and whether newly identified later work belongs in the
-tree. If focus is absent, the more specific no-focus action appears instead.
-That action also closes a completed branch by completing its verified parent,
-or expands the parent when concrete work still remains.
+Immediate answers with no existing tracked work do not need a stack. An
+existing stack must be reconciled before every final response: verified focus
+is completed, while blocked or unfinished focus remains pending and accurate.
+At the start of each later turn, a one-request instruction first checks for an
+already verified focus, then checks whether the current focus matches the next
+concrete work, whether the active branch should deepen, and whether newly
+identified later work belongs in the tree. If focus is absent, the more
+specific no-focus action appears instead. That action also closes a completed
+branch by completing its verified parent, or expands the parent when concrete
+work still remains.
 
 ## DSH integration
 
@@ -90,7 +93,9 @@ marker; pending and completed nodes use `[ ]` and `[x]`. `todo_stack__show`
 loads the full tree only when the agent needs it.
 
 Model-facing tree views and reminders use ordinary Markdown rather than XML
-wrapper tags. Revisions, turn numbers, and surface-node numbers remain as plain
+wrapper tags. Each tree includes the compact marker legend `[*] focused
+pending; [ ] pending; [x] completed` so focus cannot be mistaken for
+completion. Revisions, turn numbers, and surface-node numbers remain as plain
 text because they make successive runtime-context snapshots distinct.
 
 The plugin does not depend on or load `@deepseek-ai/dsh-tool-todo`. Keep the
@@ -146,12 +151,14 @@ The production-prompt evaluation uses independent real sessions:
 TODO_STACK_PROMPT_EVAL_RUNS=3 pnpm e2e:prompt
 ```
 
-Its six scenarios cover tracked multi-tool work, a trivial direct answer, a
-blocked focused task, expansion below an existing focus, recovery from a
-pending tree with no focus, and starting new work after the previous stack is
-complete. It grades durable tool order and tree state rather than exact wording
-or a fixed tree shape, fingerprints the effective prompt and tools, and writes
-JSON artifacts under `.tmp/`. Isolate a scenario with, for example:
+Its eight scenarios cover tracked multi-tool work, completing a single
+verified outcome before the final response, completing an already verified
+focus during a Turn Memory continuation, a trivial direct answer, a blocked
+focused task, expansion below an existing focus, recovery from a pending tree
+with no focus, and starting new work after the previous stack is complete. It
+grades durable tool order and tree state rather than exact wording or a fixed
+tree shape, fingerprints the effective prompt and tools, and writes JSON
+artifacts under `.tmp/`. Isolate a scenario with, for example:
 
 ```sh
 TODO_STACK_PROMPT_EVAL_RUNS=3 \

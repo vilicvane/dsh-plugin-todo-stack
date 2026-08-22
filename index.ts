@@ -28,12 +28,12 @@ const DEFAULT_CONTEXT_CHILDREN = 8;
 const TODO_STACK_GUIDANCE = [
   '## Todo Stack workflow',
   'Maintain a persistent todo tree as the focus map across compacted turns and sessions and as the user\'s view of task structure and progress.',
-  'Before every substantive or potentially blocking non-Todo tool call, ensure that one pending leaf is focused on the concrete outcome about to be handled. If no pending work exists, call todo_stack__create. If pending work exists but focus is absent, call todo_stack__focus. If the focused outcome is broader than the next work, call todo_stack__expand before the non-Todo tool. Track even one tool call when it can block or require follow-up. Skip the stack only for an immediate final answer that needs no tool.',
+  'Before every substantive or potentially blocking non-Todo tool call, ensure that one pending leaf is focused on the concrete outcome about to be handled. If no pending work exists, call todo_stack__create. If pending work exists but focus is absent, call todo_stack__focus. If the focused outcome is broader than the next work, call todo_stack__expand before the non-Todo tool. Track even one tool call when it can block or require follow-up. Only a direct answer with no tracked pending task may skip creating a stack.',
   'Write each node as one brief, distinct outcome—not execution steps, acceptance criteria, tool arguments, evidence, progress, notes, or final-answer requirements. Use "Assess release readiness", not "Inspect once and report every evidence code". Never copy an ancestor into a descendant or add a placeholder merely to finish its parent.',
   'Use root siblings only for independent top-level outcomes. Put checks or steps serving one goal below that goal; do not flatten them into extra roots.',
   'Add only current or established unconditional outcomes. Exclude hypothetical branches, guessed future phases, final-reporting steps, and bookkeeping actions until they become real work. Record known later work below its relevant task without losing the current focus.',
   'When a tool reveals a blocker, complete only diagnostic outcomes that are truly verified and keep the actual blocked outcome as a concise pending focus. Phrase it as objective plus dependency, such as "Deploy after credentials are provided"—not status narration such as "Blocked", "Waiting", or "Request input", and never include an error or evidence code.',
-  'Complete only verified outcomes and keep the tree synchronized with the actual work. Keep detailed working context in the conversation or workspace.',
+  'Before every final response, reconcile the existing stack with the actual outcome. Complete the focused leaf when its outcome is verified; keep it pending and accurately focused when work is blocked or unfinished. Never leave completed work marked pending. Keep detailed working context in the conversation or workspace.',
 ].join('\n');
 
 const TODO_STACK_INITIAL_GUIDANCE = [
@@ -47,7 +47,7 @@ const TODO_STACK_INITIAL_GUIDANCE = [
   '    - [ ] Style the task cards',
   'For this example, create only the dashboard root first, then use todo_stack__expand to deepen it into task cards and their children. Do not concatenate those children into the root or pass them as extra roots.',
   'Keep every node brief, but make the tree as deep as the real work requires. Root siblings are independent top-level outcomes; steps of one goal are children. Add only distinct, unconditional outcomes already known. Exclude hypothetical branches and final-reporting steps, and omit siblings when none are meaningful. Keep one meaningful leaf focused while working, including while waiting on a blocker.',
-  'After a tool call, synchronize the focused outcome with what actually happened. Complete verified work. If work is blocked, keep it pending and use todo_stack__edit so the focus names the objective plus its dependency, such as "Deploy after credentials are provided".',
+  'After a tool call, synchronize the focused outcome with what actually happened. Before the final response, complete verified work. If work is blocked, keep it pending and use todo_stack__edit so the focus names the objective plus its dependency, such as "Deploy after credentials are provided".',
   'Skip initialization only when the next action is an immediate final answer with no substantive work and no tool call.',
 ].join('\n');
 

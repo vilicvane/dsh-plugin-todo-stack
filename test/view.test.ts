@@ -39,6 +39,7 @@ function fixture(): TodoStackState {
 test('runtime snapshot shows only the focus branch and leaf-level siblings', () => {
   assert.equal(renderTodoStackContext(fixture(), 8), [
     'Todo stack (revision 12):',
+    'Markers: [*] focused pending; [ ] pending; [x] completed.',
     '- [ ] t1 开发 A 功能',
     '  - [ ] t3 调研 A2 特性',
     '    - [x] t4 验证接口',
@@ -60,6 +61,7 @@ test('a temporary no-focus state exposes pending roots', () => {
 
   assert.equal(renderTodoStackContext(state, 8), [
     'Todo stack (revision 15):',
+    'Markers: [*] focused pending; [ ] pending; [x] completed.',
     '- [ ] t1 开发 A 功能',
   ].join('\n'));
 });
@@ -81,6 +83,7 @@ test('a completed todo result exposes its ancestor path and every sibling', () =
 
   assert.equal(renderTodoStackSiblingContext(state, 't5'), [
     'Todo stack (revision 13):',
+    'Markers: [*] focused pending; [ ] pending; [x] completed.',
     '- [ ] t1 开发 A 功能',
     '  - [ ] t3 调研 A2 特性',
     '    - [x] t4 验证接口',
@@ -98,6 +101,7 @@ test('a completed root result exposes terminal and pending root siblings', () =>
 
   assert.equal(renderTodoStackSiblingContext(state, 't8'), [
     'Todo stack (revision 13):',
+    'Markers: [*] focused pending; [ ] pending; [x] completed.',
     '- [ ] t1 开发 A 功能',
     '- [x] t8 发布 B 功能',
   ].join('\n'));

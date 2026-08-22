@@ -142,6 +142,8 @@ function formatNode(
   return `${'  '.repeat(depth)}- [${status}] ${todoNodeRef(state, node.id)} ${node.content}`;
 }
 
+const TODO_STACK_MARKER_LEGEND = 'Markers: [*] focused pending; [ ] pending; [x] completed.';
+
 function pathToNode(state: TodoStackState, id: string): TodoStackNode[] {
   const reversed: TodoStackNode[] = [];
   let currentId: string | null = id;
@@ -194,7 +196,7 @@ export function renderTodoStackContext(state: TodoStackState, childLimit: number
     throw new Error('context child limit must be a positive safe integer');
   }
 
-  const lines = [`Todo stack (revision ${state.revision}):`];
+  const lines = [`Todo stack (revision ${state.revision}):`, TODO_STACK_MARKER_LEGEND];
 
   if (state.focusId === null) {
     const roots = visibleChildren(state, null, null, childLimit);
@@ -239,7 +241,7 @@ export function renderTodoStackSiblingContext(state: TodoStackState, id: string)
   const parent = affected.parentId === null ? null : requireNode(state, affected.parentId);
   const ancestors = parent === null ? [] : pathToNode(state, parent.id);
   const siblingIds = parent === null ? state.roots : parent.children;
-  const lines = [`Todo stack (revision ${state.revision}):`];
+  const lines = [`Todo stack (revision ${state.revision}):`, TODO_STACK_MARKER_LEGEND];
 
   for (const [depth, node] of ancestors.entries()) {
     lines.push(formatNode(state, node, depth, node.id === state.focusId));

@@ -98,7 +98,8 @@ export function buildTurnStartReflectionContext(options: {
     || turnHasStartedWorking(options.session, turn)) return '';
   return [
     `Todo Stack check required — turn ${turn}`,
-    'Before calling another non-Todo tool, synchronize the Todo Stack with the next work:',
+    'Synchronize the Todo Stack before the next work or final response:',
+    '- [*] means focused and still pending; only [x] means completed. If the focused outcome is already verified, call todo_stack__complete before giving the final response.',
     '- Confirm that the focused leaf matches the next concrete outcome.',
     '- If the next work is more specific, call todo_stack__expand before continuing.',
     '- Record established later work below the relevant todo without losing the current focus.',

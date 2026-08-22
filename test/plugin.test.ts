@@ -73,6 +73,8 @@ test('plugin registers namespaced tools, projections, and directive prompts', ()
   assert.match(guidance, /user's view/);
   assert.match(guidance, /brief, distinct outcome/);
   assert.match(guidance, /Never copy an ancestor into a descendant/);
+  assert.match(guidance, /Before every final response/);
+  assert.match(guidance, /Never leave completed work marked pending/);
 
   const initial = captured.contexts.find((item) => item.name === 'todo-stack:initial-guidance');
   const openingSession = Session.create(SessionId('session-initial-guidance'));
@@ -105,6 +107,8 @@ test('plugin registers namespaced tools, projections, and directive prompts', ()
   const turnStart = captured.contexts.find((item) => item.name === 'todo-stack:turn-start');
   const turnStartText = turnStart.text({ agent: { session: focusedSession } });
   assert.match(turnStartText, /Todo Stack check required/);
+  assert.match(turnStartText, /\[\*\] means focused and still pending/);
+  assert.match(turnStartText, /call todo_stack__complete before giving the final response/);
   assert.match(turnStartText, /Confirm that the focused leaf matches/);
 });
 
