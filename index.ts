@@ -26,27 +26,29 @@ const DEFAULT_MAX_NODES = 200;
 const DEFAULT_CONTEXT_CHILDREN = 8;
 
 const TODO_STACK_GUIDANCE = [
-  '## My todo stack',
-  'I maintain a persistent todo tree as my focus map across compacted turns and sessions and as the user\'s view of my task structure and progress.',
-  'Before every substantive or potentially blocking non-todo tool call, I first make sure the tree has one pending leaf whose outcome matches the work I am about to do. If no pending work exists, I create it; if focus is absent, I restore it; if the focused outcome is broader, I deepen it before that other tool call. Even one call must be tracked when it can block or require follow-up. Only an immediate final answer that needs no tool may skip the stack.',
-  'Each node names one brief, distinct outcome—not the steps, acceptance criteria, tool arguments, or final-answer requirements for producing it. For example, I write "Assess release readiness", not "Inspect once and report every evidence code". I do not copy an ancestor into a descendant, add a placeholder merely to finish its parent, or store plans, evidence, progress, notes, and implementation detail in a node.',
-  'Root siblings are independent top-level outcomes. When one goal has several checks or steps, I create that goal and deepen it into child outcomes before using non-todo tools; I do not flatten those steps into separate roots.',
-  'I add only current or established unconditional outcomes. A hypothetical branch, guessed future phase, reporting step, or bookkeeping action stays out until it becomes real work. A known later outcome belongs below its relevant task without losing focus.',
-  'When a tool reveals a blocker, I may complete a diagnostic outcome that is truly verified, but I keep the actual blocked outcome as a concise pending focus while I wait. I phrase it as objective plus dependency, for example "Deploy after credentials are provided"—never as status narration such as "Blocked: ...", "Waiting ...", or "Request input ...", and never with an error or evidence code.',
-  'I complete only verified outcomes and keep the tree synchronized with what I am actually doing. Detailed working context stays in the conversation or workspace.',
+  '## Todo Stack workflow',
+  'Maintain a persistent todo tree as the focus map across compacted turns and sessions and as the user\'s view of task structure and progress.',
+  'Before every substantive or potentially blocking non-Todo tool call, ensure that one pending leaf is focused on the concrete outcome about to be handled. If no pending work exists, call todo_stack__create. If pending work exists but focus is absent, call todo_stack__focus. If the focused outcome is broader than the next work, call todo_stack__expand before the non-Todo tool. Track even one tool call when it can block or require follow-up. Skip the stack only for an immediate final answer that needs no tool.',
+  'Write each node as one brief, distinct outcome—not execution steps, acceptance criteria, tool arguments, evidence, progress, notes, or final-answer requirements. Use "Assess release readiness", not "Inspect once and report every evidence code". Never copy an ancestor into a descendant or add a placeholder merely to finish its parent.',
+  'Use root siblings only for independent top-level outcomes. Put checks or steps serving one goal below that goal; do not flatten them into extra roots.',
+  'Add only current or established unconditional outcomes. Exclude hypothetical branches, guessed future phases, final-reporting steps, and bookkeeping actions until they become real work. Record known later work below its relevant task without losing the current focus.',
+  'When a tool reveals a blocker, complete only diagnostic outcomes that are truly verified and keep the actual blocked outcome as a concise pending focus. Phrase it as objective plus dependency, such as "Deploy after credentials are provided"—not status narration such as "Blocked", "Waiting", or "Request input", and never include an error or evidence code.',
+  'Complete only verified outcomes and keep the tree synchronized with the actual work. Keep detailed working context in the conversation or workspace.',
 ].join('\n');
 
 const TODO_STACK_INITIAL_GUIDANCE = [
-  '## Before I get started',
-  'Before I begin substantive work or call another tool, my first tool action needs to create a brief todo stack and focus the concrete outcome I will handle first. It will guide me through compacted turns and sessions and make my task structure visible to the user. For example:',
+  '## Initialize Todo Stack before work',
+  'Before beginning substantive work or calling any other tool, call todo_stack__create as the first tool action. Give the first todo only the shared outcome—not its checks, sequence, tool calls, evidence, or reporting instructions. For example, use "Assess release readiness", not "Inspect API and storage, then report the evidence".',
+  'Keep one concrete leaf focused. Use todo_stack__expand before another tool when the focused outcome has multiple distinct child outcomes. The stack preserves direction across compacted turns and sessions and makes task structure visible to the user. A deep stack may look like:',
   '- [ ] Implement the dashboard',
   '  - [ ] Implement task cards',
   '    - [ ] Add drag and drop',
   '      - [ ] Evaluate a suitable drag-and-drop approach (focus)',
   '    - [ ] Style the task cards',
-  'For this example I would create only the dashboard root, then deepen it into task cards and their children. I would not pass those steps as extra root todos.',
-  'I will keep the tree concise but as deep as the real work requires. Root siblings are independent top-level outcomes; steps of one goal become children. I add only distinct, unconditional outcomes I already know; hypothetical branches and final-reporting steps stay out, and if no meaningful sibling is known I add none. I keep one meaningful leaf focused while working, including while waiting on a blocker.',
-  'If I am only giving an immediate final answer and doing no substantive work, I can finish without creating a stack.',
+  'For this example, create only the dashboard root first, then use todo_stack__expand to deepen it into task cards and their children. Do not concatenate those children into the root or pass them as extra roots.',
+  'Keep every node brief, but make the tree as deep as the real work requires. Root siblings are independent top-level outcomes; steps of one goal are children. Add only distinct, unconditional outcomes already known. Exclude hypothetical branches and final-reporting steps, and omit siblings when none are meaningful. Keep one meaningful leaf focused while working, including while waiting on a blocker.',
+  'After a tool call, synchronize the focused outcome with what actually happened. Complete verified work. If work is blocked, keep it pending and use todo_stack__edit so the focus names the objective plus its dependency, such as "Deploy after credentials are provided".',
+  'Skip initialization only when the next action is an immediate final answer with no substantive work and no tool call.',
 ].join('\n');
 
 export interface Config {

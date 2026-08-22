@@ -28,8 +28,8 @@ more salient to the agent.
 
 Focus is guarded across the active session, not only after Todo Stack tool
 calls. After any eligible node where the plugin can insert a reminder, a null
-focus causes an immediate first-person reminder. If the agent does not restore
-focus, later eligible nodes remind it again.
+focus causes an immediate action instruction. If the agent does not restore
+focus, later eligible nodes repeat the instruction.
 
 The reminder applies whether or not pending nodes currently exist:
 
@@ -45,10 +45,11 @@ themselves.
 Candidate generic reminder:
 
 ```text
-I currently have no todo focus. Before I continue working, I need to restore
-one: choose a meaningful pending leaf, or create a new focused todo if more work
-remains. If I am only wrapping up and summarizing completed work, I can continue
-without one.
+Do not continue substantive work or call another non-Todo tool until focus is
+restored. Focus a matching pending leaf, or create one brief focused outcome if
+no pending work remains. If only a pending parent remains after its children
+finish, complete it when verified or expand it into the remaining work. Skip
+this only for the final response summarizing already completed work.
 ```
 
 ### Actionable errors
@@ -67,15 +68,19 @@ on a leaf. Use todo_stack__expand to decompose the focused task.
 
 ## Prompt design
 
-The prompts use first-person reflection and commitment. They should make the
-Todo Stack feel like the agent's own working structure rather than an external
-bookkeeping instruction.
+The prompts use direct action instructions. They state the required Todo Stack
+transition before other tools, name the relevant tool when useful, and keep the
+single final-response exception explicit.
 
-First-person voice is a required behavior, not optional tone polish. It must not
-be rewritten into second-person commands during prompt refinement. In observed
-turn-compaction usage, first-person reminders have worked well: they read as
-the agent's continuing working state and self-commitment rather than detached
-policy text.
+The earlier design required first-person reflection because it behaved well in
+turn-compaction experiments. That constraint is superseded: in a real
+DeepSeek V4 Flash Vision Exp session, the model ignored repeated first-person
+no-focus reminders. In the controlled completed-stack continuation scenario,
+the tag-free first-person variant created todos but violated node-content
+semantics in 3/3 runs, while the directive variant satisfied the full contract
+in 3/3 runs. Prompt refinements must still rewrite the opening, turn-start,
+no-focus, and post-create instructions as one coherent contract rather than
+accumulating local warnings.
 
 The wording below is directional rather than final. Before implementation, the
 opening and turn-start prompts should be rewritten together as one coherent
@@ -88,18 +93,20 @@ The opening prompt establishes both reasons for maintaining the stack:
 1. preserving direction across compacted turns and sessions; and
 2. making the task structure and progress visible to the user.
 
-Candidate wording, preserving the requested tone:
+Candidate wording:
 
 ```text
-Before I get started, I need to create a brief todo stack. It will guide me
-through compacted turns and sessions and make my task structure visible to the
-user. A typical todo stack looks like:
+Before substantive work or another tool, call todo_stack__create as the first
+tool action. Create a brief tree and focus the concrete outcome to handle first.
+The tree preserves direction across compacted turns and sessions and makes task
+structure visible to the user. Example:
 - [ ] Implement the dashboard
   - [ ] Implement task cards
     - [ ] Add drag and drop
       - [ ] Evaluate a suitable drag-and-drop approach (focus)
     - [ ] Style the task cards
-I will always keep the todo stack up to date with a meaningful focus.
+Keep one meaningful leaf focused while working. Skip initialization only for an
+immediate final answer with no substantive work or tool call.
 ```
 
 `Brief` describes the content of each node, not a shallow tree. Intermediate
@@ -117,22 +124,17 @@ and avoids competing with Turn Memory's stop-and-handoff reminder inside a long
 turn.
 
 ```text
-I am starting a new turn, so I need to reflect on whether I am still
-synchronized with the todo stack:
-- Does the current focus still match the next concrete work?
-- Am I diving deeper? I should break down the focus when that would make the
-  work structure clearer.
-- Did I identify something to handle later? I should add it below the relevant
-  todo without losing my current focus.
-- If the stack already reflects the work accurately, I can continue without
-  changing it.
+Before another non-Todo tool, synchronize the Todo Stack with the next work:
+- Confirm that the focused leaf matches the next concrete outcome.
+- If the next work is more specific, call todo_stack__expand first.
+- Record established later work below the relevant todo without losing focus.
+- If the stack already matches the work, continue without changing it.
 ```
 
-The turn-start prompt deliberately uses natural language instead of naming tools.
-This keeps it sounding like the agent's own reflection and encourages the agent
-to inspect the complete tool descriptions before choosing an operation. It
-still states the intended tree behavior precisely enough to distinguish
-decomposing current work from recording deferred work elsewhere.
+The turn-start prompt names `todo_stack__expand` because the directive form is
+intended to cause an immediate state transition, not merely describe a useful
+reflection. It still distinguishes decomposing current work from recording
+deferred work elsewhere.
 
 The earlier 30-node reminder is removed rather than retained as a fallback.
 This deployment uses Todo Stack together with Turn Memory: Turn Memory owns

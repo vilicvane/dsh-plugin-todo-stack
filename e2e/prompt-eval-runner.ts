@@ -35,6 +35,7 @@ const SCENARIOS = [
   'blocked_release',
   'existing_focus',
   'recover_focus',
+  'resume_after_completion',
 ] as const;
 type Scenario = typeof SCENARIOS[number];
 
@@ -69,6 +70,7 @@ const scenarioPrompt: Record<Scenario, string> = {
   blocked_release: `Assess whether blocked release cobalt can proceed by calling ${PROBE_TOOL} once with area blocked. If it reports missing external input, stop without retrying or inventing the input, retain a meaningful record of the blocked work, and ask me for what is needed. Include the returned COBALT evidence code.`,
   existing_focus: `Within the currently focused release task, assess cobalt readiness as one distinct piece of work. Inspect api and storage separately with ${PROBE_TOOL}, then use its verify area. Finish only the readiness work, leave the broader release task pending, and report every returned COBALT evidence code.`,
   recover_focus: `Resume the pending API compatibility check, inspect api exactly once with ${PROBE_TOOL}, then report the returned COBALT evidence code. Leave the unrelated release-notes work for later.`,
+  resume_after_completion: `Begin a new API follow-up check, inspect api exactly once with ${PROBE_TOOL}, then report the returned COBALT evidence code. The previously completed release inventory is historical work, not the current task.`,
 };
 
 function textOf(value: unknown): string {
@@ -353,6 +355,46 @@ function evaluateRecoverFocus(
   };
 }
 
+function evaluateResumeAfterCompletion(
+  calls: ReturnType<typeof toolCalls>,
+  operations: ReturnType<typeof todoOperations>,
+  state: ReturnType<typeof foldTodoStack>,
+  finalText: string,
+  inspected: readonly string[],
+  seededOperationCount: number,
+): Record<string, CheckResult> {
+  const mutations = mutationCalls(calls);
+  const modelOperations = operations.slice(seededOperationCount);
+  const firstProbeSeq = calls.find((call) => call.name === PROBE_TOOL)?.seq
+    ?? Number.POSITIVE_INFINITY;
+  const firstMutation = mutations.at(0);
+  const newNodes = Object.values(state.nodes).filter((node) => node.id !== 't1');
+  const conciseAnchors = newNodes.every((node) => node.content.length <= 100
+    && !/COBALT-|evidence|report (?:its|the|an|a)?/i.test(node.content));
+  return {
+    create_before_work: check(
+      firstMutation?.name === 'todo_stack__create'
+        && (firstMutation.seq ?? Infinity) < firstProbeSeq
+        && modelOperations.at(0)?.action === 'create',
+      `first mutation=${JSON.stringify(firstMutation)}, first probe seq=${firstProbeSeq}, operations=${JSON.stringify(modelOperations)}`,
+    ),
+    one_api_probe: check(
+      inspected.length === 1 && inspected[0] === 'api',
+      `observed=${JSON.stringify(inspected)}`,
+    ),
+    preserve_history_and_finish_new_work: check(
+      state.nodes.t1?.content === 'Inventory previous release'
+        && state.nodes.t1.status === 'completed'
+        && newNodes.length >= 1
+        && newNodes.every((node) => node.status === 'completed')
+        && state.focusId === null
+        && conciseAnchors,
+      `history=${JSON.stringify(state.nodes.t1)}, new=${JSON.stringify(newNodes)}, focus=${state.focusId ?? 'null'}`,
+    ),
+    final_evidence: check(finalText.includes('COBALT-API-2'), `final=${JSON.stringify(finalText)}`),
+  };
+}
+
 function evaluate(
   scenario: Scenario,
   session: any,
@@ -373,8 +415,17 @@ function evaluate(
     checks = evaluateBlocked(calls, state, finalText, runtime.inspected);
   } else if (scenario === 'existing_focus') {
     checks = evaluateExistingFocus(calls, operations, state, finalText, runtime.inspected, runtime.seededOperationCount);
-  } else {
+  } else if (scenario === 'recover_focus') {
     checks = evaluateRecoverFocus(calls, operations, state, finalText, runtime.inspected, runtime.seededOperationCount);
+  } else {
+    checks = evaluateResumeAfterCompletion(
+      calls,
+      operations,
+      state,
+      finalText,
+      runtime.inspected,
+      runtime.seededOperationCount,
+    );
   }
   return {
     scenario,
@@ -417,15 +468,41 @@ function seedScenario(session: any, scenario: Scenario, runtime: ScenarioRuntime
     const state = { ...created, focusId: null };
     session.append('todo/write', makeTodoStackCarrier('create', state));
     runtime.seededOperationCount = 1;
+  } else if (scenario === 'resume_after_completion') {
+    const created = mutateTodoStack(emptyTodoStack(), {
+      action: 'create',
+      todos: ['Inventory previous release'],
+    }, { maxNodes: 200 }).state;
+    const completed = mutateTodoStack(created, {
+      action: 'complete',
+      id: 't1',
+    }, { maxNodes: 200 }).state;
+    session.append('todo/write', makeTodoStackCarrier('create', created));
+    session.append('todo/write', makeTodoStackCarrier('complete', completed));
+    runtime.seededOperationCount = 2;
   }
 }
 
-async function runOne(ctx: any, selection: any, scenario: Scenario, repetition: number): Promise<RunResult> {
+async function runOne(
+  ctx: any,
+  selection: any,
+  scenario: Scenario,
+  repetition: number,
+  completePersona: boolean,
+): Promise<RunResult> {
   const agents = ctx.get('agents');
   const sessions = ctx.get('sessions');
   const runtime: ScenarioRuntime = { inspected: [], seededOperationCount: 0 };
   const setup = (agentCtx: any): void => {
     installModelSelection(agentCtx, { current: { ...selection }, assembled: undefined });
+    if (completePersona) {
+      agentCtx.systemPrompt.section({
+        name: 'todo-stack:prompt-eval-complete-persona',
+        order: 0,
+        text: 'You are a helpful software engineer assistant.',
+        complete: true,
+      });
+    }
     agentCtx.tools.presentAs('native');
     agentCtx.tools.restrict({ allow: [...TODO_TOOLS] });
     agentCtx.tools.register(defineTool({
@@ -519,6 +596,11 @@ async function run(ctx: any): Promise<void> {
     throw new Error(`TODO_STACK_PROMPT_EVAL_SCENARIOS must contain only: ${SCENARIOS.join(', ')}`);
   }
   const scenarios = [...new Set(requestedScenarios)] as Scenario[];
+  const completePersonaValue = process.env.TODO_STACK_PROMPT_EVAL_COMPLETE_PERSONA ?? '0';
+  if (completePersonaValue !== '0' && completePersonaValue !== '1') {
+    throw new Error('TODO_STACK_PROMPT_EVAL_COMPLETE_PERSONA must be 0 or 1');
+  }
+  const completePersona = completePersonaValue === '1';
   const savedSelection = defaultModel.currentSelection();
   const selection = {
     provider: process.env.TODO_STACK_PROMPT_EVAL_PROVIDER ?? savedSelection.provider,
@@ -527,7 +609,7 @@ async function run(ctx: any): Promise<void> {
   const results: RunResult[] = [];
   for (let repetition = 1; repetition <= repetitions; repetition += 1) {
     for (const scenario of scenarios) {
-      const result = await runOne(ctx, selection, scenario, repetition);
+      const result = await runOne(ctx, selection, scenario, repetition, completePersona);
       results.push(result);
       console.log(`PROMPT_EVAL_RUN scenario=${scenario} repetition=${repetition}/${repetitions} ${result.passed ? 'PASS' : 'FAIL'} session=${result.sessionId} elapsed_ms=${result.elapsedMs}`);
       for (const [criterion, value] of Object.entries(result.checks)) {
@@ -571,6 +653,7 @@ async function run(ctx: any): Promise<void> {
   await writeFile(artifactPath, JSON.stringify({
     kind: 'todo-stack-prompt-eval-matrix',
     model: selection,
+    completePersona,
     repetitions,
     scenarios,
     runs: results.length,
@@ -583,6 +666,7 @@ async function run(ctx: any): Promise<void> {
   }, null, 2) + '\n', 'utf8');
 
   console.log(`PROMPT_EVAL_MODEL=${JSON.stringify(selection)}`);
+  console.log(`PROMPT_EVAL_COMPLETE_PERSONA=${completePersona}`);
   for (const scenario of scenarios) {
     console.log(`PROMPT_EVAL_SCENARIO_SUMMARY scenario=${scenario} ${JSON.stringify(scenarioSummaries[scenario])}`);
   }

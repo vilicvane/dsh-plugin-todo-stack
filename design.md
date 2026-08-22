@@ -84,11 +84,11 @@ semantics.
 
 ## Model context
 
-The static prompt is a first-person working contract. It explains why the tree
+The static prompt is a direct working contract. It explains why the tree
 exists, keeps node contents brief, requires a meaningful leaf focus during
-substantive work, and distinguishes deeper current work from deferred work.
-The opening section adds a concrete deep-tree example and permits skipping the
-stack only for an immediate non-substantive answer.
+substantive work, and names the Todo Stack action that restores each state.
+The opening runtime context adds a concrete deep-tree example and permits
+skipping the stack only for an immediate non-substantive answer.
 
 At turn start, the agent receives a focus-local tree view. Ancestors show only
 the active branch. At the frontier, a branch focus exposes its direct children;
@@ -105,24 +105,29 @@ completion may clear focus, its result shows the affected node's ancestor path
 and every sibling, including the completed node, so the agent can choose the
 next focus without an intermediate `show` call.
 
-The `create` result also carries one short first-person granularity check. It
-asks the agent to expand before another tool only when the new root contains at
-least two independent outcomes, and explicitly excludes single tool calls,
-arguments, and final-answer requirements from becoming child todos. Limiting
-this reflection to `create` avoids over-decomposing an already precise leaf
-selected later with `focus`.
+The `create` result carries one lifecycle instruction. Before another tool it
+requires editing a root that accidentally concatenates its checks back to their
+shared outcome, then expanding only when multiple independent child outcomes
+exist. It excludes single tool calls, arguments, evidence/reporting, and
+final-answer requirements from becoming children. After that tool it requires
+synchronizing the focus: complete verified work, or edit a blocked focus into
+objective plus dependency and keep it pending. Limiting this instruction to
+`create` avoids over-decomposing an already precise leaf selected later with
+`focus`.
 
 Two dynamic reflections reinforce the contract without competing inside a
 long turn:
 
 1. At the first model request of each later turn with a focus, a one-request
-   first-person reflection asks whether the focus still matches the next
+   directive requires checking whether the focus still matches the next
    concrete work, whether the active branch should deepen, and whether newly
-   identified later work should be recorded. The reflection is never injected
-   after work has already begun in that turn.
-2. Whenever focus is null, a first-person guard follows each eligible
-   model-visible node. It asks the agent to choose a pending leaf or create new
-   work before continuing, while allowing no focus during a final wrap-up.
+   identified later work should be recorded. It is never injected after work
+   has already begun in that turn.
+2. Whenever focus is null, a direct action guard follows each eligible
+   model-visible node. It requires focusing a pending leaf, closing a verified
+   parent whose children are terminal, expanding a parent with remaining work,
+   or creating brief new work before continuing. It allows no focus during a
+   final wrap-up.
 
 The turn-start reflection is recorded once in that turn's runtime-context
 snapshot. Before the inbox message has reached the surface, the no-focus
@@ -133,6 +138,10 @@ preventing self-recursion. Opening guidance is runtime context so a complete
 persona cannot suppress Todo Stack initialization; it also suppresses the
 redundant first no-focus guard. Null focus suppresses the less specific
 turn-start reflection.
+
+The model-facing tree and both dynamic reminders use plain Markdown, not XML
+wrapper tags. The revision/turn/node position remains visible in ordinary text
+so a changed state or later eligible node produces a distinct snapshot.
 
 Maintenance pressure is intentionally asymmetric. The agent proactively keeps
 its current branch and remembered later work synchronized, but does not polish

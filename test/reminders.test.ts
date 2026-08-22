@@ -62,12 +62,11 @@ describe('todo stack dynamic reminders', () => {
     };
 
     const first = buildTurnStartReflectionContext({ session, state, opening: false });
-    assert.match(first, /todo-stack-turn-start turn="2"/);
-    assert.match(first, /I am starting a new turn/);
-    assert.match(first, /Does the current focus still match/);
-    assert.match(first, /Am I diving deeper/);
-    assert.match(first, /Did I identify something to handle later/);
-    assert.doesNotMatch(first, /todo_stack__/);
+    assert.match(first, /Todo Stack check required — turn 2/);
+    assert.match(first, /Before calling another non-Todo tool/);
+    assert.match(first, /Confirm that the focused leaf matches/);
+    assert.match(first, /todo_stack__expand/);
+    assert.match(first, /Record established later work/);
 
     session.append('user/message', message(first, {
       kind: 'plugin',
@@ -83,7 +82,7 @@ describe('todo stack dynamic reminders', () => {
     session.append('user/message', message('next'), 'append');
     assert.match(
       buildTurnStartReflectionContext({ session, state, opening: false }),
-      /todo-stack-turn-start turn="3"/,
+      /Todo Stack check required — turn 3/,
     );
   });
 
@@ -134,9 +133,13 @@ describe('todo stack dynamic reminders', () => {
     session.append('turn/start', { turn: 1 });
     session.append('user/message', message('work'), 'append');
     const first = buildNoFocusGuardContext({ session, state, opening: false });
-    assert.match(first, /after-node="1"/);
-    assert.match(first, /I currently have no todo focus/);
-    assert.match(first, /summarizing completed work/);
+    assert.match(first, /after node 1/);
+    assert.match(first, /Todo Stack action required/);
+    assert.match(first, /Do not continue substantive work/);
+    assert.match(first, /todo_stack__focus/);
+    assert.match(first, /only a pending parent remains/);
+    assert.match(first, /complete the parent when its outcome is verified/);
+    assert.match(first, /final response summarizing already completed work/);
 
     session.append('user/message', message(first, {
       kind: 'plugin',
@@ -148,7 +151,7 @@ describe('todo stack dynamic reminders', () => {
 
     session.append('assistant/message', assistant('continued', 1, 2), 'append');
     const second = buildNoFocusGuardContext({ session, state, opening: false });
-    assert.match(second, /after-node="3"/);
+    assert.match(second, /after node 3/);
     assert.notEqual(second, first);
   });
 
@@ -174,7 +177,7 @@ describe('todo stack dynamic reminders', () => {
     session.append('turn/start', { turn: 3 });
     assert.match(
       buildNoFocusGuardContext({ session, state, opening: false }),
-      /todo-stack-no-focus turn="3"/,
+      /Todo Stack action required — turn 3/,
     );
   });
 

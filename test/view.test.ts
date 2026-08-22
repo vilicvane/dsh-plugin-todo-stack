@@ -38,13 +38,12 @@ function fixture(): TodoStackState {
 
 test('runtime snapshot shows only the focus branch and leaf-level siblings', () => {
   assert.equal(renderTodoStackContext(fixture(), 8), [
-    '<todo-stack revision="12">',
+    'Todo stack (revision 12):',
     '- [ ] t1 开发 A 功能',
     '  - [ ] t3 调研 A2 特性',
     '    - [x] t4 验证接口',
     '    - [*] t5 验证异常路径',
     '    - [ ] t6 整理结论',
-    '</todo-stack>',
   ].join('\n'));
 });
 
@@ -60,9 +59,8 @@ test('a temporary no-focus state exposes pending roots', () => {
   state.focusId = null;
 
   assert.equal(renderTodoStackContext(state, 8), [
-    '<todo-stack revision="15">',
+    'Todo stack (revision 15):',
     '- [ ] t1 开发 A 功能',
-    '</todo-stack>',
   ].join('\n'));
 });
 
@@ -82,13 +80,12 @@ test('a completed todo result exposes its ancestor path and every sibling', () =
   state.focusId = null;
 
   assert.equal(renderTodoStackSiblingContext(state, 't5'), [
-    '<todo-stack revision="13">',
+    'Todo stack (revision 13):',
     '- [ ] t1 开发 A 功能',
     '  - [ ] t3 调研 A2 特性',
     '    - [x] t4 验证接口',
     '    - [x] t5 验证异常路径',
     '    - [ ] t6 整理结论',
-    '</todo-stack>',
   ].join('\n'));
 });
 
@@ -100,10 +97,9 @@ test('a completed root result exposes terminal and pending root siblings', () =>
   state.focusId = null;
 
   assert.equal(renderTodoStackSiblingContext(state, 't8'), [
-    '<todo-stack revision="13">',
+    'Todo stack (revision 13):',
     '- [ ] t1 开发 A 功能',
     '- [x] t8 发布 B 功能',
-    '</todo-stack>',
   ].join('\n'));
 });
 

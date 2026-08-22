@@ -176,14 +176,14 @@ async function run(ctx: any): Promise<void> {
 
     await followup(
       liveHandle.agent,
-      `Perform exactly these calls in order: todo_stack__expand with id "t1", sub_todo_to_focus "${CHILD_CONTENT}", rest_todos ["${SIBLING_CONTENT}"]; todo_stack__complete with id "t2"; todo_stack__focus with id "t3". Then reply briefly and make no other tool call.`,
+      `Perform exactly these calls in order: todo_stack__expand with id "t1", sub_todo_to_focus "${CHILD_CONTENT}", rest_todos ["${SIBLING_CONTENT}"]; todo_stack__complete with id "t2". Then reply briefly about the completed child and make no other tool call in this turn.`,
     );
     state = projectedState(projections, liveHandle.agent.session);
-    assert.equal(state.revision, 4);
+    assert.equal(state.revision, 3);
     assert.equal(state.nodes.t2.status, 'completed');
     assert.equal(state.nodes.t3.status, 'pending');
-    assert.equal(state.focusId, 't3');
-    assertOperations(liveHandle.agent.session, ['create', 'expand', 'complete', 'focus'], 'leaf workflow');
+    assert.equal(state.focusId, null);
+    assertOperations(liveHandle.agent.session, ['create', 'expand', 'complete'], 'leaf completion');
     const completedText = toolResultText(
       toolResultsFor(liveHandle.agent.session, 'todo_stack__complete')[0],
     );
@@ -192,14 +192,23 @@ async function run(ctx: any): Promise<void> {
     assert.equal(toolResultsFor(liveHandle.agent.session, 'todo_stack__show').length, 0);
     assert.ok(
       contextSections(liveHandle.agent.session, 'todo-stack:turn-start').some((section: any) =>
-        /I am starting a new turn/.test(section.text)),
+        /Todo Stack check required/.test(section.text)),
       'a later focused turn must receive the turn-start reflection',
     );
     assert.ok(
       contextSections(liveHandle.agent.session, 'todo-stack:no-focus').some((section: any) =>
-        /I currently have no todo focus/.test(section.text)),
+        /Todo Stack action required/.test(section.text)),
       'completion must produce a durable no-focus guard before refocus',
     );
+
+    await followup(
+      liveHandle.agent,
+      'Call todo_stack__focus exactly once with id "t3". Then reply briefly and make no other tool call.',
+    );
+    state = projectedState(projections, liveHandle.agent.session);
+    assert.equal(state.revision, 4);
+    assert.equal(state.focusId, 't3');
+    assertOperations(liveHandle.agent.session, ['create', 'expand', 'complete', 'focus'], 'leaf workflow');
 
     const sessionId = liveHandle.agent.session.id;
     const beforeResumeSeq = liveHandle.agent.session.seq;

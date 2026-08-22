@@ -43,24 +43,27 @@ id-taking tool accepts.
 
 ## Prompt behavior
 
-The prompt is written as the agent's own first-person working commitment. At
-the beginning of substantive work it creates a concise tree, keeps one
-meaningful leaf focused, deepens the current branch when work becomes more
-concrete, and records later work without losing that focus. The hierarchy may
-be deep even though each node is brief.
+The prompt uses direct action instructions. At the beginning of substantive
+work it requires a concise tree, one meaningful focused leaf, deeper children
+when the current branch is broader than the next work, and deferred children
+for established later work. The hierarchy may be deep even though each node
+is brief.
 
 One goal with several checks starts as one root and then expands into children;
 the checks are not flattened into extra roots. Nodes name outcomes rather than
 tool arguments, acceptance criteria, evidence, or final-response requirements.
-After `create`, the tool result carries one short first-person check that asks
-for another expansion only when the new root still contains two or more
-independent outcomes.
+After `create`, the tool result carries one lifecycle instruction: shorten a
+root that accidentally includes its checks, expand it when it contains multiple
+child outcomes, then complete verified work or keep a blocked objective pending
+as objective plus dependency.
 
 Immediate answers that require no substantive work do not need a stack. At the
-start of each later turn, a one-request first-person reflection asks whether
+start of each later turn, a one-request instruction requires checking whether
 the current focus still matches the next concrete work, whether the active
 branch should deepen, and whether newly identified later work belongs in the
-tree. If focus is absent, the more specific no-focus guard appears instead.
+tree. If focus is absent, the more specific no-focus action appears instead.
+That action also closes a completed branch by completing its verified parent,
+or expands the parent when concrete work still remains.
 
 ## DSH integration
 
@@ -85,6 +88,10 @@ turn. Mutation results carry the live branch, avoiding a new system context
 snapshot after every Todo Stack call. A focused node uses the compact `[*]`
 marker; pending and completed nodes use `[ ]` and `[x]`. `todo_stack__show`
 loads the full tree only when the agent needs it.
+
+Model-facing tree views and reminders use ordinary Markdown rather than XML
+wrapper tags. Revisions, turn numbers, and surface-node numbers remain as plain
+text because they make successive runtime-context snapshots distinct.
 
 The plugin does not depend on or load `@deepseek-ai/dsh-tool-todo`. Keep the
 stock `tool-todo` loader entry disabled so it cannot register a competing
@@ -139,12 +146,12 @@ The production-prompt evaluation uses independent real sessions:
 TODO_STACK_PROMPT_EVAL_RUNS=3 pnpm e2e:prompt
 ```
 
-Its five scenarios cover tracked multi-tool work, a trivial direct answer, a
-blocked focused task, expansion below an existing focus, and recovery from a
-pending tree with no focus. It grades durable tool order and tree state rather
-than exact wording or a fixed tree shape, fingerprints the effective prompt and
-tools, and writes JSON artifacts under `.tmp/`. Isolate a scenario with, for
-example:
+Its six scenarios cover tracked multi-tool work, a trivial direct answer, a
+blocked focused task, expansion below an existing focus, recovery from a
+pending tree with no focus, and starting new work after the previous stack is
+complete. It grades durable tool order and tree state rather than exact wording
+or a fixed tree shape, fingerprints the effective prompt and tools, and writes
+JSON artifacts under `.tmp/`. Isolate a scenario with, for example:
 
 ```sh
 TODO_STACK_PROMPT_EVAL_RUNS=3 \
@@ -155,6 +162,8 @@ pnpm e2e:prompt
 Prompt evaluation uses `deepseek-official/deepseek-v4-flash` by default so it
 does not contend with local GPU workloads. Set `TODO_STACK_PROMPT_EVAL_PROVIDER`
 and `TODO_STACK_PROMPT_EVAL_MODEL` when evaluating a specific model instead.
+Set `TODO_STACK_PROMPT_EVAL_COMPLETE_PERSONA=1` to suppress ordinary system
+sections and exercise the runtime-context-only path used by a complete persona.
 
 ## Configuration
 

@@ -48,12 +48,15 @@ export function buildNoFocusGuardContext(options: {
   const turn = openTurnNumber(options.session);
   if (afterSeq === undefined && turn === null) return '';
   const position = afterSeq === undefined
-    ? `turn="${turn}"`
-    : `after-node="${afterSeq}"`;
+    ? `turn ${turn}`
+    : `after node ${afterSeq}`;
   return [
-    `<todo-stack-no-focus ${position}>`,
-    'I currently have no todo focus. Before I continue working, I need to restore one: choose a meaningful pending leaf, or create a new focused todo if more work remains. If I am only wrapping up and summarizing completed work, I can continue without one.',
-    '</todo-stack-no-focus>',
+    `Todo Stack action required — ${position}`,
+    'Do not continue substantive work or call another non-Todo tool until focus is restored.',
+    '- If a pending leaf matches the next work, call todo_stack__focus with its id.',
+    '- If only a pending parent remains after its children finished, complete the parent when its outcome is verified; otherwise expand it into the remaining concrete work and focus that child.',
+    '- If no pending work remains, call todo_stack__create with one brief outcome to focus. Do not put tool steps, evidence, reporting, or final-answer requirements in the todo.',
+    '- Skip this action only when the next action is the final response summarizing already completed work.',
   ].join('\n');
 }
 
@@ -94,12 +97,11 @@ export function buildTurnStartReflectionContext(options: {
     || turnStartReflectionWasShown(options.session, turn)
     || turnHasStartedWorking(options.session, turn)) return '';
   return [
-    `<todo-stack-turn-start turn="${turn}">`,
-    'I am starting a new turn, so I need to reflect on whether I am still synchronized with the todo stack:',
-    '- Does the current focus still match the next concrete work?',
-    '- Am I diving deeper? I should break down the focus when that would make the work structure clearer.',
-    '- Did I identify something to handle later? I should add it below the relevant todo without losing my current focus.',
-    '- If the stack already reflects the work accurately, I can continue without changing it.',
-    '</todo-stack-turn-start>',
+    `Todo Stack check required — turn ${turn}`,
+    'Before calling another non-Todo tool, synchronize the Todo Stack with the next work:',
+    '- Confirm that the focused leaf matches the next concrete outcome.',
+    '- If the next work is more specific, call todo_stack__expand before continuing.',
+    '- Record established later work below the relevant todo without losing the current focus.',
+    '- If the stack already matches the work, continue without changing it.',
   ].join('\n');
 }

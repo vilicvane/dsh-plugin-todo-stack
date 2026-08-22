@@ -34,7 +34,7 @@ test('plugin loads through real Cordis services', async () => {
     const agentAssembly = await ctx.systemPrompt.assemble({ agent: { session } } as any);
     assert.match(
       agentAssembly.contexts.find((context) => context.name === 'todo-stack:initial-guidance')?.text ?? '',
-      /Before I begin substantive work/,
+      /Before beginning substantive work/,
     );
     assert.equal(
       agentAssembly.contexts.find((context) => context.name === 'todo-stack:focus')?.text,
@@ -60,7 +60,7 @@ test('plugin loads through real Cordis services', async () => {
       completeAssembly.contexts.find(
         (context) => context.name === 'todo-stack:initial-guidance',
       )?.text ?? '',
-      /Before I begin substantive work/,
+      /Before beginning substantive work/,
     );
 
     const values = ctx.sessionProjections.snapshot(session).values;

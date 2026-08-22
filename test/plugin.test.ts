@@ -41,7 +41,7 @@ function harness() {
   return { tools, projections, sections, contexts };
 }
 
-test('plugin registers namespaced tools, projections, and first-person prompts', () => {
+test('plugin registers namespaced tools, projections, and directive prompts', () => {
   const captured = harness();
   assert.deepEqual([...captured.tools.keys()], [
     'todo_stack__show',
@@ -68,16 +68,16 @@ test('plugin registers namespaced tools, projections, and first-person prompts',
   ]);
 
   const guidance = captured.sections.find((item) => item.name === 'todo-stack:guidance').text;
-  assert.match(guidance, /I maintain a persistent todo tree/);
-  assert.match(guidance, /one pending leaf whose outcome matches/);
+  assert.match(guidance, /Maintain a persistent todo tree/);
+  assert.match(guidance, /ensure that one pending leaf is focused/);
   assert.match(guidance, /user's view/);
   assert.match(guidance, /brief, distinct outcome/);
-  assert.match(guidance, /do not copy an ancestor into a descendant/);
+  assert.match(guidance, /Never copy an ancestor into a descendant/);
 
   const initial = captured.contexts.find((item) => item.name === 'todo-stack:initial-guidance');
   const openingSession = Session.create(SessionId('session-initial-guidance'));
   const text = initial.text({ agent: { session: openingSession } });
-  assert.match(text, /Before I begin substantive work/);
+  assert.match(text, /Before beginning substantive work/);
   assert.match(text, /compacted turns and sessions/);
   assert.match(text, /Evaluate a suitable drag-and-drop approach \(focus\)/);
   assert.match(text, /one meaningful leaf focused/);
@@ -104,8 +104,8 @@ test('plugin registers namespaced tools, projections, and first-person prompts',
   focusedSession.append('turn/start', { turn: 1 });
   const turnStart = captured.contexts.find((item) => item.name === 'todo-stack:turn-start');
   const turnStartText = turnStart.text({ agent: { session: focusedSession } });
-  assert.match(turnStartText, /I am starting a new turn/);
-  assert.match(turnStartText, /Does the current focus still match/);
+  assert.match(turnStartText, /Todo Stack check required/);
+  assert.match(turnStartText, /Confirm that the focused leaf matches/);
 });
 
 test('namespaced tools create, expand, show, complete, and refocus a real Session', async () => {
@@ -126,8 +126,10 @@ test('namespaced tools create, expand, show, complete, and refocus a real Sessio
   assert.deepEqual(created.createdIds, ['t1', 't2']);
   assert.equal(created.focusId, 't1');
   const createdText = create.output.render({}, created)[0].text;
-  assert.match(createdText, /<todo-stack revision="1">/);
-  assert.match(createdText, /only if it contains two or more independent outcomes/);
+  assert.match(createdText, /Todo stack \(revision 1\):/);
+  assert.match(createdText, /If its text includes checks or a sequence/);
+  assert.match(createdText, /only when the root contains two or more independent child outcomes/);
+  assert.match(createdText, /if it is blocked, keep it pending and call todo_stack__edit/);
 
   const expanded = await expand.execute({
     id: 't1',
@@ -198,18 +200,18 @@ test('focus context is frozen for a turn while mutation results carry live revis
   session.append('turn/start', { turn: 1 });
   assert.equal(focusContext.text({ agent: { session } }), '');
   const root = await create.execute({ todo_to_focus: 'Root', rest_todos: [] }, exec);
-  assert.match(create.output.render({}, root)[0].text, /<todo-stack revision="1">/);
+  assert.match(create.output.render({}, root)[0].text, /Todo stack \(revision 1\):/);
   assert.equal(focusContext.text({ agent: { session } }), '');
 
   session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
   session.append('turn/start', { turn: 2 });
-  assert.match(focusContext.text({ agent: { session } }), /<todo-stack revision="1">/);
+  assert.match(focusContext.text({ agent: { session } }), /Todo stack \(revision 1\):/);
   const child = await expand.execute({
     id: 't1',
     sub_todo_to_focus: 'Child',
     rest_todos: [],
   }, exec);
-  assert.match(expand.output.render({}, child)[0].text, /<todo-stack revision="2">/);
+  assert.match(expand.output.render({}, child)[0].text, /Todo stack \(revision 2\):/);
   assert.equal(focusContext.text({ agent: { session } }), '');
 });
 

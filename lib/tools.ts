@@ -67,7 +67,11 @@ function mutationResult(
     ? renderTodoStackSiblingContext(state, affectedNodeId)
     : renderTodoStackContext(state, contextChildren);
   const focusReflection = operation === 'create' && state.focusId !== null
-    ? 'I need to check this new root before using another tool: only if it contains two or more independent outcomes should I expand it first. A single tool call, its arguments, or a final-answer requirement is not a child todo.'
+    ? [
+      'Review the new focused root before using another tool. If its text includes checks or a sequence (for example, "inspect A and B, then report"), call todo_stack__edit first so the root names only their shared outcome (for example, "Assess release readiness").',
+      'Then call todo_stack__expand only when the root contains two or more independent child outcomes. Do not make a single tool call, its arguments, evidence/reporting, or a final-answer requirement into a child todo.',
+      'After that tool, synchronize the focus with the result: complete verified work; if it is blocked, keep it pending and call todo_stack__edit so it names the actual objective plus dependency (for example, "Deploy after credentials are provided").',
+    ].join('\n')
     : '';
   return {
     operation,
@@ -123,7 +127,7 @@ export function createTodoStackTools(ctx: RuntimeContext, settings: TodoStackRun
 
   const create = defineTool({
     name: 'todo_stack__create',
-    description: `Create an ordered root-level todo stack when no pending work exists. The first todo becomes the focused leaf. Optional rest_todos are only independent established top-level outcomes for later, and most single-request calls should omit them. Checks or steps serving the first goal are not roots: create that goal alone, then use todo_stack__expand before other tools. Do not pre-create hypothetical branches, final-reporting steps, bookkeeping actions, or speculative roots. ${TODO_DESCRIPTION}`,
+    description: `Create an ordered root-level todo stack when no pending work exists. The first todo becomes the focused leaf. Name only its shared outcome; never concatenate its checks or sequence into the root (use "Assess release readiness", not "Inspect API and storage, then report evidence"). Optional rest_todos are only independent established top-level outcomes for later, and most single-request calls should omit them. Checks or steps serving the first goal are not roots: create that goal alone, then use todo_stack__expand before other tools. Do not pre-create hypothetical branches, final-reporting steps, bookkeeping actions, or speculative roots. ${TODO_DESCRIPTION}`,
     parameters: {
       todo_to_focus: { type: 'string', required: true, description: `The first root todo and immediate meaningful focus. ${TODO_DESCRIPTION}` },
       rest_todos: { type: 'array', items: { type: 'string' }, description: `Rarely needed: other independent, unconditional top-level outcomes already established for later. Exclude checks or steps of the first goal, hypothetical branches, and reporting steps. Omit when none are known. Every item must follow this content rule: ${TODO_DESCRIPTION}` },
