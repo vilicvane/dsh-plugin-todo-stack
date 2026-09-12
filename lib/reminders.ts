@@ -7,8 +7,8 @@ export const TODO_STACK_TURN_START_CONTEXT_NAME = 'todo-stack:turn-start';
 const SYSTEM_PROMPT_PLUGIN = '@deepseek-ai/dsh-system-prompt';
 
 export function openTurnNumber(session: any): number | null {
-  for (let index = session.events.length - 1; index >= 0; index -= 1) {
-    const event = session.events[index];
+  for (let index = session.snapshotEvents().length - 1; index >= 0; index -= 1) {
+    const event = session.snapshotEvents()[index];
     if (event?.type === 'turn/end') return null;
     if (event?.type === 'turn/start') {
       return Number.isSafeInteger(event.data?.turn) ? event.data.turn : null;
@@ -18,7 +18,7 @@ export function openTurnNumber(session: any): number | null {
 }
 
 function turnStartSeq(session: any, turn: number): number | undefined {
-  return session.events.findLast((event: any) =>
+  return session.snapshotEvents().findLast((event: any) =>
     event?.type === 'turn/start' && event.data?.turn === turn)?.seq;
 }
 
@@ -31,7 +31,7 @@ function isRuntimeContextSnapshot(event: any): boolean {
 export function latestEligibleSurfaceSeq(session: any): number | undefined {
   for (let index = session.surface.nodes.length - 1; index >= 0; index -= 1) {
     const seq = session.surface.nodes[index];
-    const event = session.events[seq];
+    const event = session.snapshotEvents()[seq];
     if (event?.surfaceOp !== 'append' || isRuntimeContextSnapshot(event)) continue;
     if (deriveEventMessage(event) !== null) return seq;
   }
@@ -63,7 +63,7 @@ export function buildNoFocusGuardContext(options: {
 export function turnStartReflectionWasShown(session: any, turn: number): boolean {
   const start = turnStartSeq(session, turn);
   if (start === undefined) return false;
-  for (const event of session.events as any[]) {
+  for (const event of session.snapshotEvents() as any[]) {
     if (event?.seq <= start
       || event?.type !== 'user/message'
       || event.data?.source?.kind !== 'plugin'
@@ -79,7 +79,7 @@ export function turnStartReflectionWasShown(session: any, turn: number): boolean
 function turnHasStartedWorking(session: any, turn: number): boolean {
   const start = turnStartSeq(session, turn);
   if (start === undefined) return false;
-  return session.events.some((event: any) => event?.seq > start && (
+  return session.snapshotEvents().some((event: any) => event?.seq > start && (
     event.type === 'assistant/message'
     || event.type === 'tool/result'
     || event.type === 'todo/write'

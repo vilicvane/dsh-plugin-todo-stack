@@ -1,4 +1,4 @@
-import type { TodoItem } from '@deepseek-ai/dsh-session';
+import type { TodoItem } from '@deepseek-ai/dsh-tool-todo';
 
 export const TODO_STACK_ENVELOPE_KIND = 'dsh-plugin-todo-stack';
 export const TODO_STACK_VERSION = 1;

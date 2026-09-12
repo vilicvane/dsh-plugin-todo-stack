@@ -161,7 +161,7 @@ test('namespaced tools create, expand, show, complete, and refocus a real Sessio
   assert.equal(refocused.revision, 4);
   assert.equal(refocused.focusId, 't4');
   assert.doesNotMatch(focus.output.render({}, refocused)[0].text, /two or more independent outcomes/);
-  assert.equal(foldTodoStack(session.events).revision, 4);
+  assert.equal(foldTodoStack(session.snapshotEvents()).revision, 4);
 });
 
 test('push failure recommends expand and delete cascades through a focused subtree', async () => {
@@ -190,7 +190,7 @@ test('push failure recommends expand and delete cascades through a focused subtr
   const deleted = await (captured.tools.get('todo_stack__delete') as CapturedTool)
     .execute({ id: 't1' }, exec);
   assert.equal(deleted.focusId, null);
-  assert.deepEqual(foldTodoStack(session.events).nodes, {});
+  assert.deepEqual(foldTodoStack(session.snapshotEvents()).nodes, {});
 });
 
 test('focus context is frozen for a turn while mutation results carry live revisions', async () => {
@@ -244,7 +244,7 @@ test('tools accept the displayed prefix of a legacy node id', async () => {
     todo: 'Edited legacy root',
   }, { agent: { session } });
   assert.equal(result.affectedId, 'b05aef');
-  assert.equal(foldTodoStack(session.events).nodes[legacyId].content, 'Edited legacy root');
+  assert.equal(foldTodoStack(session.snapshotEvents()).nodes[legacyId].content, 'Edited legacy root');
 });
 
 test('todo projections persist across turn boundaries', async () => {
@@ -259,7 +259,7 @@ test('todo projections persist across turn boundaries', async () => {
   const dockProjection = captured.projections.find((item) => item.key === 'todos');
   let stack = stackProjection.init();
   let dock = dockProjection.init();
-  for (const event of session.events) {
+  for (const event of session.snapshotEvents()) {
     stack = stackProjection.apply(stack, event);
     dock = dockProjection.apply(dock, event);
   }

@@ -1,5 +1,5 @@
 import { defineTool } from '@deepseek-ai/dsh-tools';
-import type { JsonValue } from '@deepseek-ai/dsh-session';
+import type { JsonValue } from '@deepseek-ai/dsh-util-values';
 
 import {
   foldTodoStack,
@@ -28,7 +28,7 @@ interface RuntimeContext {
 }
 
 interface SessionLike {
-  events: readonly { type: string; data: unknown }[];
+  snapshotEvents(): readonly { type: string; data: unknown }[];
   append(type: 'todo/write', data: unknown): unknown;
 }
 
@@ -52,7 +52,7 @@ function renderToolValue(_args: unknown, value: JsonValue): Array<{ type: 'text'
 
 function stateFor(ctx: RuntimeContext, session: SessionLike): TodoStackState {
   const projected = ctx.get('sessionProjections')?.stateOf(session, 'todoStack');
-  return projected ?? foldTodoStack(session.events);
+  return projected ?? foldTodoStack(session.snapshotEvents());
 }
 
 function mutationResult(

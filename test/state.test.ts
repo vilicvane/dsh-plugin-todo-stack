@@ -5,6 +5,7 @@ import {
   KNOWN_SESSION_EVENT_TYPES,
   Session,
   SessionId,
+  SessionLogOffset,
 } from '@deepseek-ai/dsh-session';
 
 import {
@@ -250,10 +251,14 @@ test('whole snapshots fold through todo/write events and survive Session restore
   session.append('todo/write', second);
   const restored = Session.fromRestore(
     id,
-    JSON.parse(JSON.stringify(session.events)),
+    JSON.parse(JSON.stringify(session.snapshotEvents())),
     JSON.parse(JSON.stringify(session.header)),
+    SessionLogOffset(0),
+    // DSH 0.1.5 added the seed's aliasing state as a fifth argument. The
+    // events above are deep copies, so they are detached from the original.
+    'detached',
   );
-  const folded = foldTodoStack(restored.events);
+  const folded = foldTodoStack(restored.snapshotEvents());
   assert.equal(folded.revision, 2);
   assert.equal(folded.focusId, 't2');
   assert.equal(folded.nodes.t2.content, 'Persistent child');

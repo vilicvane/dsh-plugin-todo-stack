@@ -103,7 +103,7 @@ function parseToolArguments(value: unknown): any {
 }
 
 function toolCalls(session: any): Array<{ seq: number; name: string; arguments: any }> {
-  return session.events
+  return session.snapshotEvents()
     .filter((event: any) => event?.type === 'tool/call')
     .map((event: any) => ({
       seq: event.seq,
@@ -113,19 +113,19 @@ function toolCalls(session: any): Array<{ seq: number; name: string; arguments: 
 }
 
 function todoOperations(session: any): Array<{ seq: number; action: string }> {
-  return session.events
+  return session.snapshotEvents()
     .filter((event: any) => event?.type === 'todo/write'
       && event.data?.todoStack?.kind === 'dsh-plugin-todo-stack')
     .map((event: any) => ({ seq: event.seq, action: String(event.data.todoStack.operation) }));
 }
 
 function finalAssistantText(session: any): string {
-  const message = session.events.findLast((event: any) => event?.type === 'assistant/message');
+  const message = session.snapshotEvents().findLast((event: any) => event?.type === 'assistant/message');
   return textOf(message?.data?.message?.content ?? message?.data?.content ?? []);
 }
 
 function requestFingerprint(session: any): string | null {
-  const request = session.events.find((event: any) => event?.type === 'request/header'
+  const request = session.snapshotEvents().find((event: any) => event?.type === 'request/header'
     && Array.isArray(event.data?.header?.tools)
     && event.data.header.tools.some((tool: any) => tool?.name === PROBE_TOOL));
   if (request === undefined) return null;
@@ -470,7 +470,7 @@ function evaluate(
 ): RunResult {
   const calls = toolCalls(session);
   const operations = todoOperations(session);
-  const state = foldTodoStack(session.events);
+  const state = foldTodoStack(session.snapshotEvents());
   const finalText = finalAssistantText(session);
   let checks: Record<string, CheckResult>;
   if (scenario === 'tracked_release') {

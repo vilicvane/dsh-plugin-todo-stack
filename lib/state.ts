@@ -1,4 +1,4 @@
-import type { TodoItem } from '@deepseek-ai/dsh-session';
+import type { TodoItem } from '@deepseek-ai/dsh-tool-todo';
 
 import {
   TODO_STACK_ENVELOPE_KIND,

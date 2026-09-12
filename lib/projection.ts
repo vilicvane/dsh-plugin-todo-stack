@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection';
-import type { TodoItem } from '@deepseek-ai/dsh-session';
+import type { TodoItem } from '@deepseek-ai/dsh-tool-todo';
 
 import {
   emptyTodoStack,

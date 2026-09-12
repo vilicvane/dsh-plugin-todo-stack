@@ -89,13 +89,13 @@ export function validateTodoStackHistory(events: readonly EventLike[], fail: Fai
 }
 
 const install = Object.assign((ctx: any, fail: Fail) => {
-  for (const session of ctx.sessions.list()) validateTodoStackHistory(session.events, fail);
+  for (const session of ctx.sessions.list()) validateTodoStackHistory(session.snapshotEvents(), fail);
   ctx.on('internal/dispatch', (_mode: unknown, eventName: string, args: unknown[]) => {
     if (eventName !== 'session/event') return;
-    const session = args[0] as { events: readonly EventLike[] };
+    const session = args[0] as { snapshotEvents(): readonly EventLike[] };
     const event = args[1] as EventLike;
     if (event.type !== 'todo/write') return;
-    const previousEvents = session.events;
+    const previousEvents = session.snapshotEvents();
     let previous = emptyTodoStack();
     for (const candidate of previousEvents) {
       previous = validateCarrier(candidate, previous, fail);

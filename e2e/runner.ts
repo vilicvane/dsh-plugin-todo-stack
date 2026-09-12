@@ -30,17 +30,17 @@ const TODO_TOOLS = [
 const ALLOWED_TOOLS = [...TODO_TOOLS, PROBE_TOOL_NAME];
 
 function todoWrites(session: any): any[] {
-  return session.events.filter((event: any) =>
+  return session.snapshotEvents().filter((event: any) =>
     event.type === 'todo/write'
       && event.data?.todoStack?.kind === 'dsh-plugin-todo-stack');
 }
 
 function toolCalls(session: any): any[] {
-  return session.events.filter((event: any) => event.type === 'tool/call');
+  return session.snapshotEvents().filter((event: any) => event.type === 'tool/call');
 }
 
 function contextSections(session: any, name: string): any[] {
-  return session.events.flatMap((event: any) => {
+  return session.snapshotEvents().flatMap((event: any) => {
     if (event.type !== 'user/message'
       || event.data?.source?.kind !== 'plugin'
       || event.data.source.plugin !== '@deepseek-ai/dsh-system-prompt'
@@ -50,10 +50,10 @@ function contextSections(session: any, name: string): any[] {
 }
 
 function toolResultsFor(session: any, toolName: string): any[] {
-  const callIds = new Set(session.events
+  const callIds = new Set(session.snapshotEvents()
     .filter((event: any) => event.type === 'tool/call' && event.data?.name === toolName)
     .map((event: any) => event.data.callId));
-  return session.events.filter((event: any) =>
+  return session.snapshotEvents().filter((event: any) =>
     event.type === 'tool/result' && callIds.has(event.data?.message?.source?.callId));
 }
 
@@ -76,7 +76,7 @@ function projectedState(projections: any, session: any): TodoStackState {
   const snapshot = projections.snapshot(session);
   const state = snapshot.values.todoStack;
   assert.ok(state, 'todoStack projection is missing');
-  assert.deepEqual(state, foldTodoStack(session.events), 'projection must equal a full event replay');
+  assert.deepEqual(state, foldTodoStack(session.snapshotEvents()), 'projection must equal a full event replay');
   assert.deepEqual(snapshot.values.todos, todoDockItems(state), 'TodoDock projection must match the tree snapshot');
   return state;
 }
@@ -224,7 +224,7 @@ async function run(ctx: any): Promise<void> {
     });
     await recoveryHandle.agent.whenIdle();
     assert.deepEqual(
-      recoveryHandle.agent.session.events.slice(beforeResumeSeq).map((event: any) => event.type),
+      recoveryHandle.agent.session.snapshotEvents().slice(beforeResumeSeq).map((event: any) => event.type),
       ['session/end-seed'],
     );
     assert.deepEqual(
@@ -277,7 +277,7 @@ async function run(ctx: any): Promise<void> {
     });
     await coldHandle.agent.whenIdle();
     assert.deepEqual(
-      coldHandle.agent.session.events.slice(expectedSeq).map((event: any) => event.type),
+      coldHandle.agent.session.snapshotEvents().slice(expectedSeq).map((event: any) => event.type),
       ['session/end-seed'],
     );
     assert.deepEqual(

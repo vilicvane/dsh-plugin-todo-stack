@@ -22,7 +22,7 @@ function fixtureSession(): any {
     if (surfaceOp === 'append') surface.nodes.push(event.seq);
     return event;
   };
-  return { events, surface, header: {}, append };
+  return { events, snapshotEvents: () => events, eventAt: (seq: number) => events[seq], surface, header: {}, append };
 }
 
 function assistant(text: string, turn = 1, step = 1): any {

@@ -5,6 +5,9 @@ keeps the structure of substantive work available across turn and session
 compaction, while its focused leaf shows both the agent and the user what is
 being worked on now.
 
+Targets DSH `0.1.5-rc.2`, including its session snapshot API and split Web UI
+services.
+
 Todo nodes are deliberately brief. Each node stores one task outcome, not a
 plan, progress log, evidence store, notes field, or handoff narrative. Detailed
 working context stays in the conversation or workspace.
@@ -98,8 +101,9 @@ pending; [ ] pending; [x] completed` so focus cannot be mistaken for
 completion. Revisions, turn numbers, and surface-node numbers remain as plain
 text because they make successive runtime-context snapshots distinct.
 
-The plugin does not depend on or load `@deepseek-ai/dsh-tool-todo`. Keep the
-stock `tool-todo` loader entry disabled so it cannot register a competing
+The plugin imports only compatibility types from `@deepseek-ai/dsh-tool-todo`;
+it does not load or register the stock plugin. Keep the stock `tool-todo`
+loader entry disabled so it cannot register a competing
 `todos` projection or conflicting instructions.
 
 ## Install for local development

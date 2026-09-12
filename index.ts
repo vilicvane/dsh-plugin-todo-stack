@@ -70,16 +70,16 @@ function positiveInteger(value: number | undefined, fallback: number, name: stri
 
 function stateFor(ctx: Context, session: Session): TodoStackState {
   const registry = ctx.get('sessionProjections') as SessionProjectionRegistry | undefined;
-  return registry?.stateOf(session, 'todoStack') ?? foldTodoStack(session.events);
+  return registry?.stateOf(session, 'todoStack') ?? foldTodoStack(session.snapshotEvents());
 }
 
 /** Keep turn-start context only until the first todo mutation; results carry live updates. */
 function contextStateFor(ctx: Context, session: Session): TodoStackState | null {
-  for (let index = session.events.length - 1; index >= 0; index -= 1) {
-    const event: any = session.events[index];
+  for (let index = session.snapshotEvents().length - 1; index >= 0; index -= 1) {
+    const event: any = session.snapshotEvents()[index];
     if (event?.type === 'turn/end') break;
     if (event?.type === 'turn/start') {
-      const turnStartState = foldTodoStack(session.events.slice(0, index));
+      const turnStartState = foldTodoStack(session.snapshotEvents().slice(0, index));
       return stateFor(ctx, session).revision === turnStartState.revision
         ? turnStartState
         : null;
@@ -90,7 +90,7 @@ function contextStateFor(ctx: Context, session: Session): TodoStackState | null 
 
 function isSessionOpening(session: Session, state: TodoStackState): boolean {
   return state.revision === 0
-    && !session.events.some((event: any) => event?.type === 'turn/end');
+    && !session.snapshotEvents().some((event: any) => event?.type === 'turn/end');
 }
 
 function apply(ctx: Context, config: Config = {}): void {
