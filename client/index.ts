@@ -4,11 +4,11 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client';
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client';
 import type {} from '@deepseek-ai/dsh-client-ui-session/client';
 import {
-  IconCheckOutline14,
-  IconChevronDownOutline14,
-  IconChevronUpOutline14,
-  IconChecklistOutline14,
-  IconCloseFill14,
+  IconCheckOutlineRegular,
+  IconChevronDownOutlineRegular,
+  IconChevronUpOutlineRegular,
+  IconChecklistOutlineRegular,
+  IconCloseFillRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives';
 import type {
   PropsLocale,
@@ -189,8 +189,8 @@ function PendingGlyph(): ReactElement {
 
 function StatusGlyph({ node, focused }: { node: TodoStackNode; focused: boolean }): ReactElement {
   if (focused) return h(ProgressGlyph);
-  if (node.status === 'completed') return h(IconCheckOutline14);
-  if (node.status === 'dropped') return h(IconCloseFill14);
+  if (node.status === 'completed') return h(IconCheckOutlineRegular, { size: 14 });
+  if (node.status === 'dropped') return h(IconCloseFillRegular, { size: 14 });
   return h(PendingGlyph);
 }
 
@@ -221,11 +221,11 @@ export function TodoStackPanel({
       'aria-expanded': !collapsed,
       onClick: () => setCollapsed((value) => !value),
     },
-    h('span', { className: 'todoStackLead', 'aria-hidden': true }, h(IconChecklistOutline14)),
+    h('span', { className: 'todoStackLead', 'aria-hidden': true }, h(IconChecklistOutlineRegular, { size: 14 })),
     h('span', { className: 'todoStackTitle' }, t('title')),
     h('span', { className: 'todoStackProgress' }, progressLabel(state, t)),
     h('span', { className: 'todoStackChevron', 'aria-hidden': true },
-      collapsed ? h(IconChevronUpOutline14) : h(IconChevronDownOutline14))),
+      collapsed ? h(IconChevronUpOutlineRegular, { size: 14 }) : h(IconChevronDownOutlineRegular, { size: 14 }))),
     !collapsed && h('ul', { className: 'todoStackList' },
       ...rows.map(({ node, depth }) => {
         const focused = node.id === state.focusId;

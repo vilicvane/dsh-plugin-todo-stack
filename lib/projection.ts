@@ -68,13 +68,21 @@ export function todoDockProjection(): ProjectionDefinition<'todos', TodoItem[] |
     init: () => null,
     apply(state, event) {
       const envelope = extractTodoStackEnvelope(event);
-      if (envelope === undefined) return state;
-      return todoDockItems(envelope.state);
+      if (envelope !== undefined) return todoDockItems(envelope.state);
+
+      // Built-in agent presets run the stock todo tool, which writes the plain list
+      // this projection exposes on the very same event type.
+      if (event.type === 'todo/write') {
+        const parsed = todosProjectionSchema.safeParse((event.data as { todos?: unknown }).todos);
+        if (parsed.success) return parsed.data;
+      }
+
+      return state;
     },
     wire: {
       viewSchema: todosProjectionSchema,
       view: (state) => state,
     },
-    stateVersion: 1,
+    stateVersion: 2,
   };
 }

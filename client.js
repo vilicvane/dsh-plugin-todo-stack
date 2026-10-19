@@ -174,8 +174,8 @@ window.__ModuleLoader__.load({
     }
     function StatusGlyph({ node, focused }) {
       if (focused) return (0, import_react.createElement)(ProgressGlyph);
-      if (node.status === "completed") return (0, import_react.createElement)(import_dsh_client_ui_primitives.IconCheckOutline14);
-      if (node.status === "dropped") return (0, import_react.createElement)(import_dsh_client_ui_primitives.IconCloseFill14);
+      if (node.status === "completed") return (0, import_react.createElement)(import_dsh_client_ui_primitives.IconCheckOutlineRegular, { size: 14 });
+      if (node.status === "dropped") return (0, import_react.createElement)(import_dsh_client_ui_primitives.IconCloseFillRegular, { size: 14 });
       return (0, import_react.createElement)(PendingGlyph);
     }
     function TodoStackPanel({
@@ -201,13 +201,13 @@ window.__ModuleLoader__.load({
             "aria-expanded": !collapsed,
             onClick: () => setCollapsed((value) => !value)
           },
-          (0, import_react.createElement)("span", { className: "todoStackLead", "aria-hidden": true }, (0, import_react.createElement)(import_dsh_client_ui_primitives.IconChecklistOutline14)),
+          (0, import_react.createElement)("span", { className: "todoStackLead", "aria-hidden": true }, (0, import_react.createElement)(import_dsh_client_ui_primitives.IconChecklistOutlineRegular, { size: 14 })),
           (0, import_react.createElement)("span", { className: "todoStackTitle" }, t("title")),
           (0, import_react.createElement)("span", { className: "todoStackProgress" }, progressLabel(state, t)),
           (0, import_react.createElement)(
             "span",
             { className: "todoStackChevron", "aria-hidden": true },
-            collapsed ? (0, import_react.createElement)(import_dsh_client_ui_primitives.IconChevronUpOutline14) : (0, import_react.createElement)(import_dsh_client_ui_primitives.IconChevronDownOutline14)
+            collapsed ? (0, import_react.createElement)(import_dsh_client_ui_primitives.IconChevronUpOutlineRegular, { size: 14 }) : (0, import_react.createElement)(import_dsh_client_ui_primitives.IconChevronDownOutlineRegular, { size: 14 })
           )
         ),
         !collapsed && (0, import_react.createElement)(

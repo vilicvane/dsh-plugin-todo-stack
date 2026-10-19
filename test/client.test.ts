@@ -93,11 +93,11 @@ function loadClientModule(): { handoffId: string; exports: ClientExports } {
     if (id === '@deepseek-ai/dsh-client-ui-primitives') {
       const Icon = () => null;
       return {
-        IconCheckOutline14: Icon,
-        IconChevronDownOutline14: Icon,
-        IconChevronUpOutline14: Icon,
-        IconChecklistOutline14: Icon,
-        IconCloseFill14: Icon,
+        IconCheckOutlineRegular: Icon,
+        IconChevronDownOutlineRegular: Icon,
+        IconChevronUpOutlineRegular: Icon,
+        IconChecklistOutlineRegular: Icon,
+        IconCloseFillRegular: Icon,
       };
     }
     throw new Error(`unexpected client dependency ${id}`);
