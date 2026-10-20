@@ -24,38 +24,38 @@ interface ClientExports {
 const state: TodoStackState = {
   version: 1,
   revision: 4,
-  roots: ['root'],
+  roots: ['t1'],
   nodes: {
-    root: {
-      id: 'root',
+    t1: {
+      id: 't1',
       content: 'Ship the plugin',
       parentId: null,
-      children: ['active', 'discarded'],
+      children: ['t2', 't4'],
       status: 'pending',
     },
-    active: {
-      id: 'active',
+    t2: {
+      id: 't2',
       content: 'Polish the dock',
-      parentId: 'root',
-      children: ['done'],
+      parentId: 't1',
+      children: ['t3'],
       status: 'pending',
     },
-    done: {
-      id: 'done',
+    t3: {
+      id: 't3',
       content: 'Map the slot contract',
-      parentId: 'active',
+      parentId: 't2',
       children: [],
       status: 'completed',
     },
-    discarded: {
-      id: 'discarded',
+    t4: {
+      id: 't4',
       content: 'Encode depth in title markers',
-      parentId: 'root',
+      parentId: 't1',
       children: [],
       status: 'dropped',
     },
   },
-  focusId: 'active',
+  focusId: 't2',
 };
 
 function t(key: string, params: Record<string, unknown> = {}): string {
@@ -134,6 +134,18 @@ test('renders structured hierarchy, focus, and terminal states', () => {
   assert.match(html, /data-status="dropped"/);
   assert.match(html, />Polish the dock</);
   assert.doesNotMatch(html, />[▶×·]+ Polish the dock</);
+  assert.equal(html.match(/class="todoStackId"/g)?.length, 4);
+  for (const [id, content] of [
+    ['t1', 'Ship the plugin'],
+    ['t2', 'Polish the dock'],
+    ['t3', 'Map the slot contract'],
+    ['t4', 'Encode depth in title markers'],
+  ] as const) {
+    assert.ok(
+      html.includes(`class="todoStackId">${id}</span><span class="todoStackContent">${content}</`),
+      `row ${id} renders its id next to "${content}"`,
+    );
+  }
 });
 
 test('shadows the stock todo dock with a lower slot priority', () => {

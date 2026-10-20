@@ -88,6 +88,7 @@ const css = `
 .todoStackGlyph[data-status="focused"]{color:var(--dsw-alias-state-business-primary);animation:1s linear infinite todo-stack-spin}
 .todoStackGlyph[data-status="completed"]{color:var(--dsw-alias-state-success-primary)}
 .todoStackGlyph[data-status="dropped"]{color:var(--dsw-alias-label-caption)}
+.todoStackId{margin-inline-end:8px;color:var(--dsw-alias-label-caption);font-family:var(--ds-font-family-code);font-size:11px;line-height:18px;flex:none}
 .todoStackContent{min-width:0;text-overflow:ellipsis;white-space:nowrap;overflow:hidden;flex:auto}
 .todoStackRow[data-status="completed"] .todoStackContent,.todoStackRow[data-status="dropped"] .todoStackContent{color:var(--dsw-alias-label-tertiary)}
 .todoStackRow[data-status="dropped"] .todoStackContent{text-decoration:line-through}
@@ -248,6 +249,7 @@ export function TodoStackPanel({
           'aria-label': statusLabel,
           title: statusLabel,
         }, h(StatusGlyph, { node, focused })),
+        h('span', { className: 'todoStackId' }, node.id),
         h('span', { className: 'todoStackContent' }, node.content),
         focused ? h('span', { className: 'todoStackCurrent' }, t('status.focused')) : null);
       }))));
